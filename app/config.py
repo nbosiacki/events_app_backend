@@ -1,11 +1,25 @@
+from typing import Literal
+
+from pydantic import model_validator
 from pydantic_settings import BaseSettings
 from functools import lru_cache
 
 
 class Settings(BaseSettings):
+    # Environment
+    app_env: Literal["development", "test"] = "development"
+
     # MongoDB
     mongodb_url: str = "mongodb://localhost:27017"
-    mongodb_db_name: str = "stockholm_events"
+    mongodb_db_name: str = ""
+
+    @model_validator(mode="after")
+    def derive_db_name(self) -> "Settings":
+        """Derive database name from app_env if not explicitly set."""
+        if not self.mongodb_db_name:
+            suffix = "dev" if self.app_env == "development" else "test"
+            self.mongodb_db_name = f"stockholm_events_{suffix}"
+        return self
 
     # Anthropic
     anthropic_api_key: str = ""
