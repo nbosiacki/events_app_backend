@@ -97,6 +97,7 @@ class TestEventResponseFromMongo:
             "source_url": "https://example.com/jazz",
             "source_site": "example.com",
             "categories": ["jazz", "music"],
+            "image_url": "https://picsum.photos/seed/music/600/400",
             "scraped_at": datetime(2025, 5, 1, 12, 0),
         }
         event = EventResponse.from_mongo(doc)
@@ -112,9 +113,10 @@ class TestEventResponseFromMongo:
         assert event.price.bucket == "standard"
         assert event.source_url == "https://example.com/jazz"
         assert event.categories == ["jazz", "music"]
+        assert event.image_url == "https://picsum.photos/seed/music/600/400"
 
     def test_missing_optional_fields(self):
-        """Optional fields (description, datetime_end, categories) may be absent."""
+        """Optional fields (description, datetime_end, categories, image_url) may be absent."""
         doc = {
             "_id": ObjectId(),
             "title": "Open Mic",
@@ -130,6 +132,7 @@ class TestEventResponseFromMongo:
         assert event.description is None
         assert event.datetime_end is None
         assert event.categories == []
+        assert event.image_url is None
 
     def test_scraped_at_defaults_when_missing(self):
         """If scraped_at is absent from the document, from_mongo falls back to utcnow."""

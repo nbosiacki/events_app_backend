@@ -155,6 +155,7 @@ async def sample_event(setup_db):
         "source_url": "https://example.com/events/test-concert",
         "source_site": "example.com",
         "categories": ["music", "concert"],
+        "image_url": "https://picsum.photos/seed/music/600/400",
         "scraped_at": datetime.now(timezone.utc),
     }
     result = await mongodb.db.events.insert_one(event_doc)

@@ -132,6 +132,41 @@ async def like_event(
     return {"message": "Event liked successfully"}
 
 
+@router.delete("/{user_id}/like/{event_id}")
+async def unlike_event(
+    user_id: str,
+    event_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """
+    Remove a like from an event.
+
+    Requires authentication. Users can only unlike events for their own profile.
+    Idempotent — removing a non-existent like is a no-op.
+    """
+    db = get_database()
+
+    if not ObjectId.is_valid(user_id) or not ObjectId.is_valid(event_id):
+        raise HTTPException(status_code=400, detail="Invalid ID format")
+
+    # Verify user is modifying their own data
+    if current_user["_id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Cannot modify another user's liked events",
+        )
+
+    result = await db.users.update_one(
+        {"_id": ObjectId(user_id)},
+        {"$pull": {"liked_events": event_id}},
+    )
+
+    if result.matched_count == 0:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    return {"message": "Event unliked successfully"}
+
+
 @router.post("/{user_id}/attend/{event_id}")
 async def attend_event(
     user_id: str,

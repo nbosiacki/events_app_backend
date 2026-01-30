@@ -52,6 +52,7 @@ class EventBase(BaseModel):
     source_url: str
     source_site: str
     categories: List[str] = Field(default_factory=list)
+    image_url: Optional[str] = None
     raw_data: Optional[dict] = None
 
 
@@ -83,6 +84,7 @@ class EventResponse(BaseModel):
     source_url: str
     source_site: str
     categories: List[str]
+    image_url: Optional[str] = None
     scraped_at: datetime
 
     @classmethod
@@ -98,5 +100,6 @@ class EventResponse(BaseModel):
             source_url=doc["source_url"],
             source_site=doc["source_site"],
             categories=doc.get("categories", []),
+            image_url=doc.get("image_url"),
             scraped_at=doc.get("scraped_at", datetime.utcnow()),
         )

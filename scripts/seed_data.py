@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from motor.motor_asyncio import AsyncIOMotorClient
 from app.models.event import Price
+from app.auth.password import hash_password
 
 # ---------------------------------------------------------------------------
 # Template data
@@ -252,6 +253,20 @@ SOURCE_SITES = [
     "ticnet.se",
 ]
 
+# Deterministic placeholder images per category (picsum.photos with seeded IDs)
+CATEGORY_IMAGE_URLS = {
+    "music": "https://picsum.photos/seed/music/600/400",
+    "art": "https://picsum.photos/seed/art/600/400",
+    "food": "https://picsum.photos/seed/food/600/400",
+    "sports": "https://picsum.photos/seed/sports/600/400",
+    "theater": "https://picsum.photos/seed/theater/600/400",
+    "film": "https://picsum.photos/seed/film/600/400",
+    "comedy": "https://picsum.photos/seed/comedy/600/400",
+    "workshop": "https://picsum.photos/seed/workshop/600/400",
+    "festival": "https://picsum.photos/seed/festival/600/400",
+    "family": "https://picsum.photos/seed/family/600/400",
+}
+
 
 # ---------------------------------------------------------------------------
 # Generation functions (pure, testable without DB)
@@ -300,6 +315,10 @@ def generate_event_dict(index: int, date_range_start: datetime, date_range_end: 
     slug = title.lower().replace(" ", "-").replace(":", "").replace("'", "")
     source_url = f"https://{source_site}/events/{slug}-{index}"
 
+    # Image URL from category mapping
+    category = template["categories"][0] if template["categories"] else None
+    image_url = CATEGORY_IMAGE_URLS.get(category)
+
     return {
         "title": title,
         "description": description,
@@ -314,6 +333,7 @@ def generate_event_dict(index: int, date_range_start: datetime, date_range_end: 
         "source_url": source_url,
         "source_site": source_site,
         "categories": template["categories"],
+        "image_url": image_url,
         "scraped_at": datetime.utcnow(),
         "raw_data": None,
     }
@@ -339,6 +359,45 @@ def generate_events(count: int = 50) -> List[dict]:
     events = [generate_event_dict(i, date_range_start, date_range_end) for i in range(count)]
     events.sort(key=lambda e: e["datetime_start"])
     return events
+
+
+# ---------------------------------------------------------------------------
+# Dev user
+# ---------------------------------------------------------------------------
+
+DEV_USER_EMAIL = "dev@example.com"
+DEV_USER_PASSWORD = "DevPass1"
+DEV_USER_NAME = "Dev User"
+
+
+def generate_dev_user() -> dict:
+    """Generate a dev user document with known credentials.
+
+    Credentials:
+        email:    dev@example.com
+        password: DevPass1
+
+    Returns:
+        A dict matching the MongoDB user document schema.
+    """
+    return {
+        "email": DEV_USER_EMAIL,
+        "name": DEV_USER_NAME,
+        "password_hash": hash_password(DEV_USER_PASSWORD),
+        "email_verified": True,
+        "created_at": datetime.utcnow(),
+        "preferences": {
+            "preferred_categories": [],
+            "max_price_bucket": "premium",
+            "preferred_areas": [],
+        },
+        "liked_events": [],
+        "attended_events": [],
+        "failed_login_attempts": 0,
+        "locked_until": None,
+        "last_login": None,
+        "auth_providers": [],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -373,11 +432,14 @@ async def seed_database(count: int, clear: bool, env: str):
     await db.events.create_index("datetime_start")
     await db.events.create_index("price.bucket")
     await db.events.create_index("source_url", unique=True)
+    await db.users.create_index("email", unique=True)
 
     try:
         if clear:
             result = await db.events.delete_many({})
             print(f"Cleared {result.deleted_count} existing events from {settings.mongodb_db_name}")
+            user_result = await db.users.delete_many({})
+            print(f"Cleared {user_result.deleted_count} existing users")
 
         events = generate_events(count)
 
@@ -399,6 +461,14 @@ async def seed_database(count: int, clear: bool, env: str):
 
         print("-" * 50)
         print(f"Done: Inserted {inserted}, Skipped {skipped}")
+
+        # Seed dev user
+        dev_user = generate_dev_user()
+        try:
+            await db.users.insert_one(dev_user)
+            print(f"\nDev user created: {DEV_USER_EMAIL} / {DEV_USER_PASSWORD}")
+        except Exception:
+            print(f"\nDev user already exists: {DEV_USER_EMAIL} / {DEV_USER_PASSWORD}")
 
     finally:
         client.close()

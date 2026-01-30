@@ -105,6 +105,10 @@ class EventScraper:
                                         "type": "array",
                                         "items": {"type": "string"},
                                     },
+                                    "image_url": {
+                                        "type": "string",
+                                        "description": "URL of the event's thumbnail or hero image",
+                                    },
                                 },
                                 "required": ["title", "venue_name", "source_url"],
                             },
@@ -301,6 +305,7 @@ Start by fetching the seed page.""",
             source_url=source_url,
             source_site=source_site,
             categories=data.get("categories", []),
+            image_url=data.get("image_url"),
             raw_data=data,
         )
 

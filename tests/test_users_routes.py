@@ -2,10 +2,11 @@
 Tests for the /api/users endpoints.
 
 Covers:
-    GET  /users/{user_id}                – own profile, other user (403), unauthenticated
-    PUT  /users/{user_id}/preferences    – update preferences, other user (403)
-    POST /users/{user_id}/like/{event}   – like event, idempotent, nonexistent event (404)
-    POST /users/{user_id}/attend/{event} – mark attended, idempotent, other user (403)
+    GET    /users/{user_id}                – own profile, other user (403), unauthenticated
+    PUT    /users/{user_id}/preferences    – update preferences, other user (403)
+    POST   /users/{user_id}/like/{event}   – like event, idempotent, nonexistent event (404)
+    DELETE /users/{user_id}/like/{event}   – unlike event, idempotent, other user (403)
+    POST   /users/{user_id}/attend/{event} – mark attended, idempotent, other user (403)
 
 All routes require authentication and enforce that users can only modify their
 own data. Tests use a real MongoDB test database.
@@ -141,6 +142,72 @@ class TestLikeEvent:
             headers=auth_headers,
         )
         assert response.status_code == 403
+
+
+class TestUnlikeEvent:
+    """DELETE /api/users/{user_id}/like/{event_id} — unlike an event."""
+
+    async def test_unlike_event_success(self, client, test_user, sample_event, auth_headers):
+        """Unliking a previously liked event should succeed."""
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        # Like first
+        await client.post(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+
+        # Unlike
+        response = await client.delete(
+            f"/api/users/{user_id}/like/{event_id}", headers=auth_headers
+        )
+        assert response.status_code == 200
+
+    async def test_unlike_removes_from_array(self, client, test_user, sample_event, auth_headers):
+        """After unliking, the event should no longer be in liked_events."""
+        from app.db import mongodb
+
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        await client.post(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+        await client.delete(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+
+        user = await mongodb.db.users.find_one({"_id": test_user["_id"]})
+        assert event_id not in user["liked_events"]
+
+    async def test_unlike_idempotent(self, client, test_user, sample_event, auth_headers):
+        """Unliking an event that isn't liked should still return 200 (no-op)."""
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        response = await client.delete(
+            f"/api/users/{user_id}/like/{event_id}", headers=auth_headers
+        )
+        assert response.status_code == 200
+
+    async def test_unlike_other_user_returns_403(self, client, sample_event, auth_headers):
+        """Trying to unlike on behalf of another user should return 403."""
+        other_id = str(ObjectId())
+        event_id = str(sample_event["_id"])
+
+        response = await client.delete(
+            f"/api/users/{other_id}/like/{event_id}", headers=auth_headers
+        )
+        assert response.status_code == 403
+
+    async def test_unlike_unauthenticated_returns_401(self, client, test_user, sample_event):
+        """Calling unlike without a token should return 401."""
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        response = await client.delete(f"/api/users/{user_id}/like/{event_id}")
+        assert response.status_code == 401
+
+    async def test_unlike_invalid_id_returns_400(self, client, auth_headers):
+        """A malformed user or event ID should return 400."""
+        response = await client.delete(
+            "/api/users/bad-id/like/also-bad", headers=auth_headers
+        )
+        assert response.status_code == 400
 
 
 class TestAttendEvent:

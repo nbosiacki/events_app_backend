@@ -17,6 +17,7 @@ from datetime import datetime, timedelta
 
 from scripts.seed_data import (
     CATEGORIES,
+    CATEGORY_IMAGE_URLS,
     EVENT_TEMPLATES,
     SOURCE_SITES,
     VENUES,
@@ -106,6 +107,23 @@ class TestGenerateEventDict:
             event = generate_event_dict(i, now, now + timedelta(days=7))
             assert event["datetime_start"].minute in (0, 30)
             assert event["datetime_start"].second == 0
+
+    def test_image_url_present(self):
+        """Every generated event should have an image_url field."""
+        now = datetime.utcnow()
+        for i in range(20):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            assert "image_url" in event
+            assert event["image_url"] is not None
+
+    def test_image_url_matches_category(self):
+        """image_url should correspond to the event's primary category."""
+        now = datetime.utcnow()
+        for i in range(30):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            category = event["categories"][0]
+            expected_url = CATEGORY_IMAGE_URLS[category]
+            assert event["image_url"] == expected_url
 
 
 class TestGenerateEvents:

@@ -171,6 +171,35 @@ class TestCreateEvent:
         assert data["title"] == "New Event"
         assert "id" in data
 
+    async def test_create_event_with_image_url(self, client):
+        """An event payload with image_url should store and return it."""
+        payload = {
+            "title": "Art Show",
+            "venue": {"name": "Moderna Museet"},
+            "datetime_start": "2025-06-01T18:00:00",
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/art-show",
+            "source_site": "example.com",
+            "image_url": "https://picsum.photos/seed/art/600/400",
+        }
+        response = await client.post("/api/events", json=payload)
+        assert response.status_code == 200
+        assert response.json()["image_url"] == "https://picsum.photos/seed/art/600/400"
+
+    async def test_create_event_without_image_url(self, client):
+        """An event without image_url should default to None."""
+        payload = {
+            "title": "No Image Event",
+            "venue": {"name": "Test Venue"},
+            "datetime_start": "2025-06-01T18:00:00",
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/no-image",
+            "source_site": "example.com",
+        }
+        response = await client.post("/api/events", json=payload)
+        assert response.status_code == 200
+        assert response.json()["image_url"] is None
+
     async def test_duplicate_source_url_returns_409(self, client, sample_event):
         """Posting an event with an existing source_url should return 409 Conflict."""
         payload = {
