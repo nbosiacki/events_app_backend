@@ -73,7 +73,10 @@ async def get_current_user(token: str = Depends(oauth2_scheme)) -> dict:
     # Check if account is locked
     if user.get("locked_until"):
         from datetime import datetime, timezone
-        if datetime.now(timezone.utc) < user["locked_until"]:
+        locked = user["locked_until"]
+        if locked.tzinfo is None:
+            locked = locked.replace(tzinfo=timezone.utc)
+        if datetime.now(timezone.utc) < locked:
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
                 detail="Account is temporarily locked",

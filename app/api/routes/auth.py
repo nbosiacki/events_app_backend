@@ -14,6 +14,18 @@ Endpoints:
 from datetime import datetime, timedelta, timezone
 import secrets
 
+
+def _ensure_utc(dt: datetime) -> datetime:
+    """Attach UTC tzinfo to a naive datetime (as returned by Motor/PyMongo).
+
+    MongoDB stores all datetimes in UTC but Motor returns them without
+    tzinfo by default.  This lets us safely compare against
+    datetime.now(timezone.utc) without hitting a TypeError.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
 from fastapi import APIRouter, HTTPException, status, Depends
 from fastapi.security import OAuth2PasswordRequestForm
 from bson import ObjectId
@@ -106,7 +118,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
 
     # Check if account is locked
     if user and user.get("locked_until"):
-        if datetime.now(timezone.utc) < user["locked_until"]:
+        if datetime.now(timezone.utc) < _ensure_utc(user["locked_until"]):
             raise HTTPException(
                 status_code=status.HTTP_423_LOCKED,
                 detail="Account temporarily locked due to too many failed login attempts. Try again later.",
@@ -282,7 +294,7 @@ async def reset_password(request: PasswordResetConfirm):
 
     # Check if token has expired
     expires = user.get("password_reset_expires")
-    if not expires or datetime.now(timezone.utc) > expires:
+    if not expires or datetime.now(timezone.utc) > _ensure_utc(expires):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Reset token has expired",
