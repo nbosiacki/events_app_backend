@@ -129,6 +129,222 @@ class TestGetEvents:
         assert data[1]["title"] == "Late Event"
 
 
+class TestSortParameter:
+    """GET /api/events?sort=... — sort order tests."""
+
+    async def test_sort_by_time_default(self, client, setup_db):
+        """Default sort (time) returns events by datetime_start ascending."""
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "Late",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 20, 0),
+            "price": {"amount": 100, "currency": "SEK", "bucket": "standard"},
+            "source_url": "https://example.com/late",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Early",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 10, 0),
+            "price": {"amount": 50, "currency": "SEK", "bucket": "budget"},
+            "source_url": "https://example.com/early",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        response = await client.get("/api/events?sort=time")
+        data = response.json()
+        assert data[0]["title"] == "Early"
+        assert data[1]["title"] == "Late"
+
+    async def test_sort_by_price_asc(self, client, setup_db):
+        """sort=price_asc returns cheapest events first."""
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "Expensive",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 18, 0),
+            "price": {"amount": 500, "currency": "SEK", "bucket": "premium"},
+            "source_url": "https://example.com/expensive",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Cheap",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 18, 0),
+            "price": {"amount": 50, "currency": "SEK", "bucket": "budget"},
+            "source_url": "https://example.com/cheap",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        response = await client.get("/api/events?sort=price_asc")
+        data = response.json()
+        assert data[0]["title"] == "Cheap"
+        assert data[1]["title"] == "Expensive"
+
+    async def test_sort_by_price_desc(self, client, setup_db):
+        """sort=price_desc returns most expensive events first."""
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "Cheap",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 18, 0),
+            "price": {"amount": 50, "currency": "SEK", "bucket": "budget"},
+            "source_url": "https://example.com/cheap",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Expensive",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 18, 0),
+            "price": {"amount": 500, "currency": "SEK", "bucket": "premium"},
+            "source_url": "https://example.com/expensive",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        response = await client.get("/api/events?sort=price_desc")
+        data = response.json()
+        assert data[0]["title"] == "Expensive"
+        assert data[1]["title"] == "Cheap"
+
+    async def test_sort_relevance_unauthenticated_falls_back_to_time(self, client, setup_db):
+        """sort=relevance without auth token falls back to time sort."""
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "Late",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 20, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/late",
+            "source_site": "example.com",
+            "categories": ["music"],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Early",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 10, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/early",
+            "source_site": "example.com",
+            "categories": ["art"],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        response = await client.get("/api/events?sort=relevance")
+        assert response.status_code == 200
+        data = response.json()
+        # Falls back to time sort: Early before Late
+        assert data[0]["title"] == "Early"
+        assert data[1]["title"] == "Late"
+
+    async def test_sort_relevance_authenticated(self, client, test_user, auth_headers, setup_db):
+        """sort=relevance with auth token uses preference scoring."""
+        from app.db import mongodb
+
+        # Give the test user a preference for music
+        await mongodb.db.users.update_one(
+            {"_id": test_user["_id"]},
+            {"$set": {"preferences.preferred_categories": ["music"]}},
+        )
+
+        await mongodb.db.events.insert_one({
+            "title": "Art Show",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 10, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/art",
+            "source_site": "example.com",
+            "categories": ["art"],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Jazz Night",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 20, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/jazz",
+            "source_site": "example.com",
+            "categories": ["music"],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        response = await client.get("/api/events?sort=relevance", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        # Jazz Night should rank higher due to music preference
+        assert data[0]["title"] == "Jazz Night"
+
+    async def test_relevance_reflects_preference_update(self, client, test_user, auth_headers, setup_db):
+        """Updating preferences via API changes relevance sort on next fetch."""
+        from app.db import mongodb
+
+        # Insert two events: art event earlier, music event later
+        await mongodb.db.events.insert_one({
+            "title": "Art Show",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 10, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/art-pref",
+            "source_site": "example.com",
+            "categories": ["art"],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Jazz Night",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 20, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/jazz-pref",
+            "source_site": "example.com",
+            "categories": ["music"],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        # Before preference update: no preferred categories → passthrough (time order)
+        response = await client.get("/api/events?sort=relevance", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["title"] == "Art Show", "Without preferences, should fall back to time order"
+        assert data[1]["title"] == "Jazz Night"
+
+        # Update preferences to prefer music via the API
+        user_id = str(test_user["_id"])
+        pref_response = await client.put(
+            f"/api/users/{user_id}/preferences",
+            json={
+                "preferred_categories": ["music"],
+                "max_price_bucket": "premium",
+                "preferred_areas": [],
+            },
+            headers=auth_headers,
+        )
+        assert pref_response.status_code == 200
+
+        # After preference update: music event should rank first
+        response = await client.get("/api/events?sort=relevance", headers=auth_headers)
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["title"] == "Jazz Night", "After setting music preference, music event should rank first"
+        assert data[1]["title"] == "Art Show"
+
+
 class TestGetEventById:
     """GET /api/events/{event_id} — single event lookup."""
 

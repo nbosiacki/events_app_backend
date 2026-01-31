@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Optional, List, Literal
 from datetime import datetime, date
 from bson import ObjectId
 
 from app.db.mongodb import get_database
 from app.models.event import EventResponse, EventCreate, Price
+from app.auth.dependencies import get_current_user_optional
+from app.services.preferences import analyze_implicit_preferences
+from app.services.recommendations import score_events
 
 router = APIRouter(prefix="/events", tags=["events"])
 
@@ -15,10 +18,14 @@ async def get_events(
     price_bucket: Optional[Literal["free", "budget", "standard", "premium"]] = Query(
         None, description="Filter by price bucket"
     ),
+    sort: Literal["relevance", "time", "price_asc", "price_desc"] = Query(
+        "time", description="Sort order"
+    ),
     limit: int = Query(50, ge=1, le=100),
     skip: int = Query(0, ge=0),
+    current_user: Optional[dict] = Depends(get_current_user_optional),
 ):
-    """Get events with optional date and price filtering."""
+    """Get events with optional date, price filtering, and sort order."""
     db = get_database()
     query = {}
 
@@ -31,7 +38,28 @@ async def get_events(
     if price_bucket:
         query["price.bucket"] = price_bucket
 
-    cursor = db.events.find(query).sort("datetime_start", 1).skip(skip).limit(limit)
+    # For relevance sort, fetch all matching events then score and paginate in Python
+    if sort == "relevance" and current_user:
+        cursor = db.events.find(query).sort("datetime_start", 1)
+        all_events = await cursor.to_list(length=1000)
+
+        implicit_prefs = await analyze_implicit_preferences(current_user, db)
+        explicit_prefs = current_user.get("preferences", {})
+
+        scored = score_events(all_events, explicit_prefs, implicit_prefs)
+        paginated = scored[skip : skip + limit]
+        return [EventResponse.from_mongo(event) for event in paginated]
+
+    # DB-level sort for time and price sorts
+    if sort == "price_asc":
+        mongo_sort = ("price.amount", 1)
+    elif sort == "price_desc":
+        mongo_sort = ("price.amount", -1)
+    else:
+        # "time" or unauthenticated "relevance" fallback
+        mongo_sort = ("datetime_start", 1)
+
+    cursor = db.events.find(query).sort(*mongo_sort).skip(skip).limit(limit)
     events = await cursor.to_list(length=limit)
 
     return [EventResponse.from_mongo(event) for event in events]
