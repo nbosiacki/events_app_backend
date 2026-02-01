@@ -345,6 +345,64 @@ class TestSortParameter:
         assert data[1]["title"] == "Art Show"
 
 
+    async def test_sort_by_popular(self, client, setup_db):
+        """sort=popular returns events ordered by like_count + attend_count descending."""
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "Unpopular",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 10, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/unpopular",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+            "like_count": 1,
+            "attend_count": 0,
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Popular",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 20, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/popular",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+            "like_count": 10,
+            "attend_count": 5,
+        })
+
+        response = await client.get("/api/events?sort=popular")
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["title"] == "Popular"
+        assert data[1]["title"] == "Unpopular"
+
+    async def test_popular_sort_returns_counts_in_response(self, client, setup_db):
+        """Events returned with sort=popular should include like_count and attend_count."""
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "Counted Event",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/counted",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+            "like_count": 7,
+            "attend_count": 3,
+        })
+
+        response = await client.get("/api/events?sort=popular")
+        data = response.json()
+        assert data[0]["like_count"] == 7
+        assert data[0]["attend_count"] == 3
+
+
 class TestGetEventById:
     """GET /api/events/{event_id} — single event lookup."""
 

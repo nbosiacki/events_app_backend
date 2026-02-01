@@ -134,6 +134,42 @@ class TestEventResponseFromMongo:
         assert event.categories == []
         assert event.image_url is None
 
+    def test_event_response_includes_counts(self):
+        """EventResponse.from_mongo should include like_count and attend_count."""
+        doc = {
+            "_id": ObjectId(),
+            "title": "Popular Event",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 6, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/popular",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime(2025, 5, 1, 12, 0),
+            "like_count": 5,
+            "attend_count": 3,
+        }
+        event = EventResponse.from_mongo(doc)
+        assert event.like_count == 5
+        assert event.attend_count == 3
+
+    def test_event_response_defaults_counts_to_zero(self):
+        """EventResponse.from_mongo should default counts to 0 for old documents."""
+        doc = {
+            "_id": ObjectId(),
+            "title": "Old Event",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 6, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/old",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime(2025, 5, 1, 12, 0),
+        }
+        event = EventResponse.from_mongo(doc)
+        assert event.like_count == 0
+        assert event.attend_count == 0
+
     def test_scraped_at_defaults_when_missing(self):
         """If scraped_at is absent from the document, from_mongo falls back to utcnow."""
         doc = {

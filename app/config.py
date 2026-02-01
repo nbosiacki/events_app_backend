@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     max_failed_login_attempts: int = 5
     account_lockout_minutes: int = 15
 
+    # Admin
+    admin_api_key: str = ""  # Set in .env to enable admin analytics endpoints
+
     # Frontend URL for email links
     frontend_url: str = "http://localhost:5173"
 

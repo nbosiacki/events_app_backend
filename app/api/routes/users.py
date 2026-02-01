@@ -121,6 +121,10 @@ async def like_event(
     if not event:
         raise HTTPException(status_code=404, detail="Event not found")
 
+    # Check if already liked to avoid double-incrementing the count
+    user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+    already_liked = event_id in user_doc.get("liked_events", [])
+
     result = await db.users.update_one(
         {"_id": ObjectId(user_id)},
         {"$addToSet": {"liked_events": event_id}},
@@ -128,6 +132,12 @@ async def like_event(
 
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if not already_liked:
+        await db.events.update_one(
+            {"_id": ObjectId(event_id)},
+            {"$inc": {"like_count": 1}},
+        )
 
     return {"message": "Event liked successfully"}
 
@@ -156,6 +166,10 @@ async def unlike_event(
             detail="Cannot modify another user's liked events",
         )
 
+    # Check if actually liked to avoid decrementing below zero
+    user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+    was_liked = event_id in user_doc.get("liked_events", [])
+
     result = await db.users.update_one(
         {"_id": ObjectId(user_id)},
         {"$pull": {"liked_events": event_id}},
@@ -163,6 +177,12 @@ async def unlike_event(
 
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if was_liked:
+        await db.events.update_one(
+            {"_id": ObjectId(event_id)},
+            {"$inc": {"like_count": -1}},
+        )
 
     return {"message": "Event unliked successfully"}
 
@@ -190,6 +210,10 @@ async def attend_event(
             detail="Cannot modify another user's attendance",
         )
 
+    # Check if already attended to avoid double-incrementing the count
+    user_doc = await db.users.find_one({"_id": ObjectId(user_id)})
+    already_attended = event_id in user_doc.get("attended_events", [])
+
     result = await db.users.update_one(
         {"_id": ObjectId(user_id)},
         {"$addToSet": {"attended_events": event_id}},
@@ -197,5 +221,11 @@ async def attend_event(
 
     if result.matched_count == 0:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if not already_attended:
+        await db.events.update_one(
+            {"_id": ObjectId(event_id)},
+            {"$inc": {"attend_count": 1}},
+        )
 
     return {"message": "Event marked as attended"}

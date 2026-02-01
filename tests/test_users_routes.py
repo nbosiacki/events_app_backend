@@ -247,3 +247,86 @@ class TestAttendEvent:
             headers=auth_headers,
         )
         assert response.status_code == 403
+
+
+class TestDenormalizedCounts:
+    """Verify like_count and attend_count on event documents stay in sync."""
+
+    async def test_like_increments_event_like_count(self, client, test_user, sample_event, auth_headers):
+        """Liking an event should increment like_count on the event document."""
+        from app.db import mongodb
+
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        await client.post(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+
+        event = await mongodb.db.events.find_one({"_id": sample_event["_id"]})
+        assert event["like_count"] == 1
+
+    async def test_like_idempotent_does_not_double_increment(self, client, test_user, sample_event, auth_headers):
+        """Liking the same event twice should only increment like_count once."""
+        from app.db import mongodb
+
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        await client.post(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+        await client.post(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+
+        event = await mongodb.db.events.find_one({"_id": sample_event["_id"]})
+        assert event["like_count"] == 1
+
+    async def test_unlike_decrements_event_like_count(self, client, test_user, sample_event, auth_headers):
+        """Unliking a previously liked event should decrement like_count."""
+        from app.db import mongodb
+
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        await client.post(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+        await client.delete(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+
+        event = await mongodb.db.events.find_one({"_id": sample_event["_id"]})
+        assert event.get("like_count", 0) == 0
+
+    async def test_unlike_idempotent_does_not_double_decrement(self, client, test_user, sample_event, auth_headers):
+        """Unliking an event that isn't liked should not decrement like_count below zero."""
+        from app.db import mongodb
+
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        # Like then unlike
+        await client.post(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+        await client.delete(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+        # Second unlike — should be a no-op
+        await client.delete(f"/api/users/{user_id}/like/{event_id}", headers=auth_headers)
+
+        event = await mongodb.db.events.find_one({"_id": sample_event["_id"]})
+        assert event.get("like_count", 0) == 0
+
+    async def test_attend_increments_event_attend_count(self, client, test_user, sample_event, auth_headers):
+        """Attending an event should increment attend_count on the event document."""
+        from app.db import mongodb
+
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        await client.post(f"/api/users/{user_id}/attend/{event_id}", headers=auth_headers)
+
+        event = await mongodb.db.events.find_one({"_id": sample_event["_id"]})
+        assert event["attend_count"] == 1
+
+    async def test_attend_idempotent_does_not_double_increment(self, client, test_user, sample_event, auth_headers):
+        """Attending the same event twice should only increment attend_count once."""
+        from app.db import mongodb
+
+        user_id = str(test_user["_id"])
+        event_id = str(sample_event["_id"])
+
+        await client.post(f"/api/users/{user_id}/attend/{event_id}", headers=auth_headers)
+        await client.post(f"/api/users/{user_id}/attend/{event_id}", headers=auth_headers)
+
+        event = await mongodb.db.events.find_one({"_id": sample_event["_id"]})
+        assert event["attend_count"] == 1

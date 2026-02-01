@@ -18,7 +18,7 @@ async def get_events(
     price_bucket: Optional[Literal["free", "budget", "standard", "premium"]] = Query(
         None, description="Filter by price bucket"
     ),
-    sort: Literal["relevance", "time", "price_asc", "price_desc"] = Query(
+    sort: Literal["relevance", "time", "price_asc", "price_desc", "popular"] = Query(
         "time", description="Sort order"
     ),
     limit: int = Query(50, ge=1, le=100),
@@ -49,6 +49,25 @@ async def get_events(
         scored = score_events(all_events, explicit_prefs, implicit_prefs)
         paginated = scored[skip : skip + limit]
         return [EventResponse.from_mongo(event) for event in paginated]
+
+    # Popular sort: aggregate pipeline with computed popularity score
+    if sort == "popular":
+        pipeline = [
+            {"$match": query},
+            {"$addFields": {
+                "popularity_score": {
+                    "$add": [
+                        {"$ifNull": ["$like_count", 0]},
+                        {"$ifNull": ["$attend_count", 0]},
+                    ]
+                }
+            }},
+            {"$sort": {"popularity_score": -1, "datetime_start": 1}},
+            {"$skip": skip},
+            {"$limit": limit},
+        ]
+        events = await db.events.aggregate(pipeline).to_list(length=limit)
+        return [EventResponse.from_mongo(event) for event in events]
 
     # DB-level sort for time and price sorts
     if sort == "price_asc":

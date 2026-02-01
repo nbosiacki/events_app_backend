@@ -319,6 +319,16 @@ def generate_event_dict(index: int, date_range_start: datetime, date_range_end: 
     category = template["categories"][0] if template["categories"] else None
     image_url = CATEGORY_IMAGE_URLS.get(category)
 
+    # Popularity counts — skewed distribution: most events low, some high
+    like_count = random.choices(
+        [0, random.randint(1, 5), random.randint(5, 20), random.randint(20, 100)],
+        weights=[30, 40, 20, 10],
+    )[0]
+    attend_count = random.choices(
+        [0, random.randint(1, 3), random.randint(3, 15), random.randint(15, 50)],
+        weights=[40, 35, 15, 10],
+    )[0]
+
     return {
         "title": title,
         "description": description,
@@ -334,6 +344,8 @@ def generate_event_dict(index: int, date_range_start: datetime, date_range_end: 
         "source_site": source_site,
         "categories": template["categories"],
         "image_url": image_url,
+        "like_count": like_count,
+        "attend_count": attend_count,
         "scraped_at": datetime.utcnow(),
         "raw_data": None,
     }

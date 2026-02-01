@@ -53,6 +53,8 @@ class EventBase(BaseModel):
     source_site: str
     categories: List[str] = Field(default_factory=list)
     image_url: Optional[str] = None
+    like_count: int = 0
+    attend_count: int = 0
     raw_data: Optional[dict] = None
 
 
@@ -85,6 +87,8 @@ class EventResponse(BaseModel):
     source_site: str
     categories: List[str]
     image_url: Optional[str] = None
+    like_count: int = 0
+    attend_count: int = 0
     scraped_at: datetime
 
     @classmethod
@@ -101,5 +105,7 @@ class EventResponse(BaseModel):
             source_site=doc["source_site"],
             categories=doc.get("categories", []),
             image_url=doc.get("image_url"),
+            like_count=doc.get("like_count", 0),
+            attend_count=doc.get("attend_count", 0),
             scraped_at=doc.get("scraped_at", datetime.utcnow()),
         )

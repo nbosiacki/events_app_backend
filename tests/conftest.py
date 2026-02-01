@@ -24,6 +24,7 @@ import os
 # Must happen before any app import touches get_settings()
 os.environ["APP_ENV"] = "test"
 os.environ["JWT_SECRET_KEY"] = "test-secret-key-for-testing-only"
+os.environ["ADMIN_API_KEY"] = "test-admin-key"
 
 import pytest
 from datetime import datetime, timezone

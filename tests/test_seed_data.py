@@ -194,3 +194,15 @@ class TestTemplateData:
     def test_source_sites_not_empty(self):
         """At least one source site must be defined."""
         assert len(SOURCE_SITES) >= 1
+
+    def test_includes_like_and_attend_counts(self):
+        """Every generated event must include like_count and attend_count as non-negative ints."""
+        now = datetime.utcnow()
+        for i in range(30):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            assert "like_count" in event
+            assert "attend_count" in event
+            assert isinstance(event["like_count"], int)
+            assert isinstance(event["attend_count"], int)
+            assert event["like_count"] >= 0
+            assert event["attend_count"] >= 0
