@@ -28,7 +28,7 @@ async def run_scrape_task(url: str, source_name: str, max_pages: int):
     deduplicator = EventDeduplicator()
 
     try:
-        events = await scraper.scrape(url, source_name, max_pages)
+        events = await scraper.scrape(url, source_name, max_pages, db=db)
 
         if not events:
             return

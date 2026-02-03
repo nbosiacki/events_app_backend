@@ -60,7 +60,7 @@ async def run_scraper(url: str, source_name: str, max_pages: int = 5):
     try:
         # Scrape events
         print("\nScraping events...")
-        events = await scraper.scrape(url, source_name, max_pages)
+        events = await scraper.scrape(url, source_name, max_pages, db=db)
         print(f"Found {len(events)} events")
 
         if not events:

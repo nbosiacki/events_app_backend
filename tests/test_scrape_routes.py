@@ -42,3 +42,23 @@ class TestTriggerScrape:
             })
         assert response.status_code == 200
         assert "5 pages" in response.json()["message"]
+
+
+class TestRunScrapeTask:
+    """run_scrape_task — verifies scraper is called with db parameter."""
+
+    async def test_scraper_called_with_db(self, client):
+        """run_scrape_task should pass db to scraper.scrape()."""
+        with patch("app.api.routes.scrape.EventScraper") as MockScraper, \
+             patch("app.api.routes.scrape.EventDeduplicator"):
+
+            mock_instance = MockScraper.return_value
+            mock_instance.scrape = AsyncMock(return_value=[])
+            mock_instance.close = lambda: None
+
+            from app.api.routes.scrape import run_scrape_task
+            await run_scrape_task("https://example.com", "example", 3)
+
+            mock_instance.scrape.assert_called_once()
+            call_kwargs = mock_instance.scrape.call_args
+            assert call_kwargs.kwargs.get("db") is not None

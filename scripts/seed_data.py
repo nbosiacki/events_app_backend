@@ -49,6 +49,8 @@ VENUES = [
     {"name": "Skansen", "address": "Djurgårdsslätten 49-51, 115 21 Stockholm", "coordinates": [59.3264, 18.1036]},
     {"name": "Vasamuseet", "address": "Galärvarvsvägen 14, 115 21 Stockholm", "coordinates": [59.3280, 18.0914]},
     {"name": "Münchenbryggeriet", "address": "Torkel Knutssonsgatan 2, 118 25 Stockholm", "coordinates": [59.3171, 18.0580]},
+    {"name": "Online Event", "address": None, "coordinates": None},
+    {"name": "Zoom Webinar", "address": None, "coordinates": None},
 ]
 
 CATEGORIES = [
@@ -243,6 +245,24 @@ EVENT_TEMPLATES = [
         "duration_hours": (1.5, 4),
         "categories": ["family"],
     },
+    {
+        "titles": [
+            "Virtual Coding Workshop",
+            "Online Photography Masterclass",
+            "Remote Wine Tasting",
+            "Digital Art Live Stream",
+            "Virtual Book Club Meeting",
+        ],
+        "descriptions": [
+            "Join from the comfort of your home for this engaging online event.",
+            "A virtual experience connecting participants across Stockholm and beyond.",
+            "Log in and learn — all you need is an internet connection.",
+        ],
+        "price_range": (0, 200),
+        "duration_hours": (1, 2.5),
+        "categories": ["workshop"],
+        "is_online": True,
+    },
 ]
 
 SOURCE_SITES = [
@@ -290,7 +310,16 @@ def generate_event_dict(index: int, date_range_start: datetime, date_range_end: 
     template = random.choice(EVENT_TEMPLATES)
     title = random.choice(template["titles"])
     description = random.choice(template["descriptions"])
-    venue = random.choice(VENUES)
+    is_online = template.get("is_online", False)
+
+    # Pick an appropriate venue based on online status
+    if is_online:
+        online_venues = [v for v in VENUES if v.get("address") is None]
+        venue = random.choice(online_venues)
+    else:
+        physical_venues = [v for v in VENUES if v.get("address") is not None]
+        venue = random.choice(physical_venues)
+
     source_site = random.choice(SOURCE_SITES)
 
     # Random datetime within range, snapped to nearest 30 minutes
@@ -329,6 +358,11 @@ def generate_event_dict(index: int, date_range_start: datetime, date_range_end: 
         weights=[40, 35, 15, 10],
     )[0]
 
+    # Online events get a meeting link
+    online_link = None
+    if is_online:
+        online_link = f"https://zoom.us/j/{random.randint(100000000, 999999999)}"
+
     return {
         "title": title,
         "description": description,
@@ -344,6 +378,8 @@ def generate_event_dict(index: int, date_range_start: datetime, date_range_end: 
         "source_site": source_site,
         "categories": template["categories"],
         "image_url": image_url,
+        "is_online": is_online,
+        "online_link": online_link,
         "like_count": like_count,
         "attend_count": attend_count,
         "scraped_at": datetime.utcnow(),

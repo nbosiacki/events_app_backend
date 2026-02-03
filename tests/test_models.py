@@ -185,3 +185,73 @@ class TestEventResponseFromMongo:
 
         # scraped_at should be a datetime, roughly "now"
         assert isinstance(event.scraped_at, datetime)
+
+
+class TestOnlineFields:
+    """Verify is_online and online_link fields on EventBase and EventResponse."""
+
+    def test_defaults_to_not_online(self):
+        """EventBase (via EventCreate) should default is_online to False and online_link to None."""
+        from app.models.event import EventCreate
+
+        event = EventCreate(
+            title="Test",
+            venue=Venue(name="V"),
+            datetime_start=datetime(2025, 6, 1, 18, 0),
+            source_url="https://example.com/test",
+            source_site="example.com",
+        )
+        assert event.is_online is False
+        assert event.online_link is None
+
+    def test_online_event_fields_stored(self):
+        """EventCreate with is_online=True and online_link should store both correctly."""
+        from app.models.event import EventCreate
+
+        event = EventCreate(
+            title="Online Workshop",
+            venue=Venue(name="Zoom Webinar"),
+            datetime_start=datetime(2025, 6, 1, 18, 0),
+            source_url="https://example.com/online",
+            source_site="example.com",
+            is_online=True,
+            online_link="https://zoom.us/j/123456789",
+        )
+        assert event.is_online is True
+        assert event.online_link == "https://zoom.us/j/123456789"
+
+    def test_from_mongo_with_online_fields(self):
+        """EventResponse.from_mongo should include is_online and online_link when present."""
+        doc = {
+            "_id": ObjectId(),
+            "title": "Online Talk",
+            "venue": {"name": "Zoom"},
+            "datetime_start": datetime(2025, 6, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/online-talk",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime(2025, 5, 1, 12, 0),
+            "is_online": True,
+            "online_link": "https://zoom.us/j/987654321",
+        }
+        event = EventResponse.from_mongo(doc)
+        assert event.is_online is True
+        assert event.online_link == "https://zoom.us/j/987654321"
+
+    def test_from_mongo_without_online_fields(self):
+        """EventResponse.from_mongo should default is_online to False for old documents."""
+        doc = {
+            "_id": ObjectId(),
+            "title": "Old Event",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 6, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/old",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime(2025, 5, 1, 12, 0),
+        }
+        event = EventResponse.from_mongo(doc)
+        assert event.is_online is False
+        assert event.online_link is None

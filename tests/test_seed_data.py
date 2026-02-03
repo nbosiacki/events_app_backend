@@ -206,3 +206,27 @@ class TestTemplateData:
             assert isinstance(event["attend_count"], int)
             assert event["like_count"] >= 0
             assert event["attend_count"] >= 0
+
+    def test_has_is_online_field(self):
+        """Every generated event must include the is_online field."""
+        now = datetime.utcnow()
+        for i in range(30):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            assert "is_online" in event
+            assert isinstance(event["is_online"], bool)
+
+    def test_online_events_have_no_address(self):
+        """Online events should have a venue with no address."""
+        now = datetime.utcnow()
+        for i in range(100):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            if event["is_online"]:
+                assert event["venue"]["address"] is None
+                assert "online_link" in event
+                assert event["online_link"] is not None
+
+    def test_includes_online_events(self):
+        """With enough events generated, at least one should be online."""
+        events = generate_events(count=100)
+        online = [e for e in events if e["is_online"]]
+        assert len(online) >= 1, "Expected at least one online event in 100 generated"

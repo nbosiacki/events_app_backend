@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 from anthropic import Anthropic
 from datetime import datetime
 from typing import Optional
+from urllib.parse import urljoin, urlparse
 import json
 import re
 
@@ -13,14 +14,20 @@ settings = get_settings()
 
 
 class EventScraper:
-    """Claude-powered web scraper for event discovery."""
+    """Claude-powered web scraper for event discovery.
+
+    Supports a three-tier scraping strategy:
+    1. URL pre-check — skip events already in the database
+    2. Site parser — use CSS selectors for known sites (fast, free)
+    3. Claude fallback — agentic scraping for unknown sites or when parsers fail
+    """
 
     def __init__(self):
         self.client = Anthropic(api_key=settings.anthropic_api_key)
         self.http_client = httpx.Client(
             timeout=30.0,
             headers={
-                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
             },
         )
 
@@ -45,8 +52,6 @@ class EventScraper:
             for a in soup.find_all("a", href=True)[:50]:
                 href = a["href"]
                 if href.startswith("/"):
-                    from urllib.parse import urljoin
-
                     href = urljoin(url, href)
                 if href.startswith("http"):
                     links.append({"text": a.get_text(strip=True)[:100], "url": href})
@@ -60,6 +65,101 @@ class EventScraper:
             }
         except Exception as e:
             return {"success": False, "url": url, "error": str(e)}
+
+    def _fetch_raw_html(self, url: str) -> Optional[str]:
+        """Fetch a page and return its raw HTML, or None on error."""
+        try:
+            response = self.http_client.get(url)
+            response.raise_for_status()
+            return response.text
+        except Exception:
+            return None
+
+    def extract_urls_from_page(self, html: str, base_url: str) -> list[str]:
+        """Extract event-like URLs from a page's links.
+
+        Filters for links that look like event detail pages based on
+        common URL patterns (e.g., /e/, /event/, /events/).
+        """
+        soup = BeautifulSoup(html, "lxml")
+        urls = set()
+
+        event_patterns = re.compile(
+            r"/e/|/event/|/events/[^?#]*[a-z0-9-]$|/event-|tickets",
+            re.IGNORECASE,
+        )
+
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            full_url = urljoin(base_url, href)
+
+            # Only keep http(s) URLs on the same domain or known event sites
+            parsed = urlparse(full_url)
+            if not parsed.scheme.startswith("http"):
+                continue
+
+            if event_patterns.search(full_url):
+                # Normalize: strip fragment and trailing slash
+                clean = full_url.split("#")[0].rstrip("/")
+                urls.add(clean)
+
+        return sorted(urls)
+
+    async def filter_known_urls(self, urls: list[str], db) -> list[str]:
+        """Batch-check URLs against the database and return only new ones.
+
+        Args:
+            urls: Candidate event URLs
+            db: Motor database instance
+
+        Returns:
+            URLs not already present as source_url in the events collection
+        """
+        if not urls:
+            return []
+
+        cursor = db.events.find(
+            {"source_url": {"$in": urls}},
+            {"source_url": 1, "_id": 0},
+        )
+        existing = {doc["source_url"] async for doc in cursor}
+        return [u for u in urls if u not in existing]
+
+    def try_site_parser(self, url: str, html: str) -> Optional[list[EventCreate]]:
+        """Attempt to parse events using a registered site-specific parser.
+
+        Returns a list of EventCreate if the parser is healthy and extraction
+        succeeds, or None if no parser matches or the health check fails.
+        """
+        from app.parsers import get_parser_for_url
+
+        parser = get_parser_for_url(url)
+        if not parser:
+            return None
+
+        health = parser.health_check(html, url)
+        if not health.is_healthy:
+            print(
+                f"  Parser {parser.site_name} health check failed: {health.message}"
+            )
+            return None
+
+        # Try listing page extraction
+        event_urls = parser.extract_event_urls(html, url)
+        if event_urls:
+            events = []
+            for event_url in event_urls:
+                event_html = self._fetch_raw_html(event_url)
+                if not event_html:
+                    continue
+                event = parser.parse_event(event_html, event_url)
+                if event:
+                    events.append(event)
+            return events if events else None
+
+        # Try parsing the page directly as a single event
+        event = parser.parse_event(html, url)
+        return [event] if event else None
 
     def _get_tools(self):
         """Define tools available to Claude for scraping."""
@@ -109,6 +209,14 @@ class EventScraper:
                                         "type": "string",
                                         "description": "URL of the event's thumbnail or hero image",
                                     },
+                                    "is_online": {
+                                        "type": "boolean",
+                                        "description": "True if the event is online or virtual",
+                                    },
+                                    "online_link": {
+                                        "type": "string",
+                                        "description": "URL for joining online/virtual events (e.g., Zoom, YouTube link)",
+                                    },
                                 },
                                 "required": ["title", "venue_name", "source_url"],
                             },
@@ -145,20 +253,10 @@ class EventScraper:
             return json.dumps({"success": True})
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
-    async def scrape(
+    async def _scrape_with_claude(
         self, seed_url: str, source_site: str, max_pages: int = 5
     ) -> list[EventCreate]:
-        """
-        Scrape events from a website using Claude as the agent.
-
-        Args:
-            seed_url: Starting URL to scrape
-            source_site: Name of the source (e.g., "eventbrite.se")
-            max_pages: Maximum number of pages to fetch
-
-        Returns:
-            List of EventCreate objects
-        """
+        """Original Claude agentic scrape flow."""
         all_events = []
         messages = [
             {
@@ -179,6 +277,8 @@ Focus on events in Stockholm, Sweden. Extract as much detail as possible includi
 - Price (0 if free, otherwise the numeric amount)
 - Categories/tags
 - Event URL
+- Whether the event is online/virtual (is_online)
+- If online, the meeting/streaming link (online_link)
 
 Start by fetching the seed page.""",
             }
@@ -245,6 +345,83 @@ Start by fetching the seed page.""",
 
         return all_events
 
+    async def scrape(
+        self, seed_url: str, source_site: str, max_pages: int = 5, db=None
+    ) -> list[EventCreate]:
+        """
+        Scrape events from a website using a three-tier strategy.
+
+        When db is provided:
+        1. Fetch the listing page and extract event URLs
+        2. Pre-check URLs against the database, skipping known ones
+        3. For each new URL, try the site-specific parser first
+        4. Fall back to Claude agentic scraping for remaining URLs
+
+        When db is None, uses the original Claude-only flow for backward
+        compatibility.
+
+        Args:
+            seed_url: Starting URL to scrape
+            source_site: Name of the source (e.g., "eventbrite.com")
+            max_pages: Maximum number of pages to fetch
+            db: Optional Motor database instance for URL pre-checking
+
+        Returns:
+            List of EventCreate objects
+        """
+        if db is None:
+            return await self._scrape_with_claude(seed_url, source_site, max_pages)
+
+        all_events = []
+        claude_urls = []
+
+        # Step 1: Fetch listing page
+        html = self._fetch_raw_html(seed_url)
+        if not html:
+            print(f"  Failed to fetch listing page: {seed_url}")
+            return await self._scrape_with_claude(seed_url, source_site, max_pages)
+
+        # Step 2: Extract event URLs
+        event_urls = self.extract_urls_from_page(html, seed_url)
+        print(f"  Found {len(event_urls)} event URLs on listing page")
+
+        if not event_urls:
+            # No extractable URLs — fall back to Claude for the whole flow
+            return await self._scrape_with_claude(seed_url, source_site, max_pages)
+
+        # Step 3: Pre-check against database
+        new_urls = await self.filter_known_urls(event_urls, db)
+        skipped = len(event_urls) - len(new_urls)
+        print(f"  URL pre-check: {len(new_urls)} new, {skipped} already known")
+
+        if not new_urls:
+            print("  All URLs already known — nothing to scrape")
+            return []
+
+        # Step 4: Try site parser, then Claude fallback
+        for url in new_urls:
+            event_html = self._fetch_raw_html(url)
+            if not event_html:
+                claude_urls.append(url)
+                continue
+
+            parsed = self.try_site_parser(url, event_html)
+            if parsed:
+                print(f"  Parser extracted {len(parsed)} event(s) from {url}")
+                all_events.extend(parsed)
+            else:
+                claude_urls.append(url)
+
+        # Step 5: Run Claude on remaining URLs
+        if claude_urls:
+            print(f"  Claude fallback for {len(claude_urls)} URL(s)")
+            claude_events = await self._scrape_with_claude(
+                seed_url, source_site, max_pages
+            )
+            all_events.extend(claude_events)
+
+        return all_events
+
     def _create_event(
         self, data: dict, source_site: str
     ) -> Optional[EventCreate]:
@@ -306,6 +483,8 @@ Start by fetching the seed page.""",
             source_site=source_site,
             categories=data.get("categories", []),
             image_url=data.get("image_url"),
+            is_online=bool(data.get("is_online", False)),
+            online_link=data.get("online_link"),
             raw_data=data,
         )
 

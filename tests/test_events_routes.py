@@ -474,6 +474,26 @@ class TestCreateEvent:
         assert response.status_code == 200
         assert response.json()["image_url"] is None
 
+    async def test_create_online_event(self, client):
+        """An online event with is_online and online_link should be stored and returned."""
+        payload = {
+            "title": "Online Workshop",
+            "venue": {"name": "Zoom Webinar"},
+            "datetime_start": "2025-06-01T18:00:00",
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/online-workshop",
+            "source_site": "example.com",
+            "is_online": True,
+            "online_link": "https://zoom.us/j/123456789",
+        }
+        response = await client.post("/api/events", json=payload)
+        assert response.status_code == 200
+
+        data = response.json()
+        assert data["title"] == "Online Workshop"
+        assert data["is_online"] is True
+        assert data["online_link"] == "https://zoom.us/j/123456789"
+
     async def test_duplicate_source_url_returns_409(self, client, sample_event):
         """Posting an event with an existing source_url should return 409 Conflict."""
         payload = {
