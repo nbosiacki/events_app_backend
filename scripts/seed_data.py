@@ -292,7 +292,12 @@ CATEGORY_IMAGE_URLS = {
 # Generation functions (pure, testable without DB)
 # ---------------------------------------------------------------------------
 
-def generate_event_dict(index: int, date_range_start: datetime, date_range_end: datetime) -> dict:
+def generate_event_dict(
+    index: int,
+    date_range_start: datetime,
+    date_range_end: datetime,
+    template_override: dict | None = None,
+) -> dict:
     """Generate a single event document from templates.
 
     Picks a random event template, venue, and source site, then randomizes the
@@ -303,11 +308,12 @@ def generate_event_dict(index: int, date_range_start: datetime, date_range_end: 
         index: Unique index used to build a unique source_url.
         date_range_start: Earliest possible event start datetime.
         date_range_end: Latest possible event start datetime.
+        template_override: If provided, use this template instead of picking randomly.
 
     Returns:
         A dict matching the MongoDB event document schema, ready for insert_one().
     """
-    template = random.choice(EVENT_TEMPLATES)
+    template = template_override if template_override is not None else random.choice(EVENT_TEMPLATES)
     title = random.choice(template["titles"])
     description = random.choice(template["descriptions"])
     is_online = template.get("is_online", False)
@@ -394,8 +400,13 @@ def generate_events(count: int = 50) -> List[dict]:
     ensures the frontend DatePicker (which shows 7 days from today) always
     has events to display, and some past events exist for testing date filters.
 
+    Guarantees at least one online event per calendar day in the range so that
+    online event functionality can always be tested regardless of which day
+    is selected in the UI.
+
     Args:
-        count: Number of events to generate.
+        count: Minimum number of events to generate. May be exceeded if the
+            date range spans more days than count (one online event per day).
 
     Returns:
         List of event dicts sorted by datetime_start ascending.
@@ -404,7 +415,27 @@ def generate_events(count: int = 50) -> List[dict]:
     date_range_start = now - timedelta(days=7)
     date_range_end = now + timedelta(days=14)
 
-    events = [generate_event_dict(i, date_range_start, date_range_end) for i in range(count)]
+    online_template = next(t for t in EVENT_TEMPLATES if t.get("is_online"))
+
+    events = []
+    index = 0
+
+    # Guarantee one online event per calendar day
+    current_day = date_range_start.replace(hour=0, minute=0, second=0, microsecond=0)
+    end_day = date_range_end.replace(hour=0, minute=0, second=0, microsecond=0)
+    while current_day <= end_day:
+        day_start = current_day.replace(hour=9)
+        day_end = current_day.replace(hour=22)
+        events.append(generate_event_dict(index, day_start, day_end, template_override=online_template))
+        index += 1
+        current_day += timedelta(days=1)
+
+    # Fill remaining slots with random events
+    remaining = max(0, count - len(events))
+    for _ in range(remaining):
+        events.append(generate_event_dict(index, date_range_start, date_range_end))
+        index += 1
+
     events.sort(key=lambda e: e["datetime_start"])
     return events
 

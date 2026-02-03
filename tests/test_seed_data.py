@@ -135,9 +135,10 @@ class TestGenerateEvents:
         assert len(events) == 50
 
     def test_custom_count(self):
-        """The count parameter controls the output size."""
+        """Count is a minimum — output may exceed it to guarantee daily online events."""
         events = generate_events(count=10)
-        assert len(events) == 10
+        # 22 days in range (-7 to +14) means at least 22 online events
+        assert len(events) >= 10
 
     def test_sorted_by_datetime_start(self):
         """Events must be sorted chronologically by datetime_start."""
@@ -155,8 +156,8 @@ class TestGenerateEvents:
         assert has_future, "Expected at least one future event"
 
     def test_price_bucket_distribution(self):
-        """Multiple price buckets should be represented across 50 events."""
-        events = generate_events(count=50)
+        """Multiple price buckets should be represented across generated events."""
+        events = generate_events(count=80)
         buckets = {e["price"]["bucket"] for e in events}
         # With varied price ranges across templates, at least 3 of 4 buckets
         assert len(buckets) >= 3
@@ -226,7 +227,11 @@ class TestTemplateData:
                 assert event["online_link"] is not None
 
     def test_includes_online_events(self):
-        """With enough events generated, at least one should be online."""
-        events = generate_events(count=100)
+        """Every calendar day in the range should have at least one online event."""
+        events = generate_events(count=50)
         online = [e for e in events if e["is_online"]]
-        assert len(online) >= 1, "Expected at least one online event in 100 generated"
+        # 22 days in the range (-7 to +14 inclusive), one online event per day
+        assert len(online) >= 22, f"Expected at least 22 online events (one per day), got {len(online)}"
+        # Verify each day is covered
+        online_days = {e["datetime_start"].date() for e in online}
+        assert len(online_days) >= 22
