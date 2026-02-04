@@ -4,6 +4,7 @@ from datetime import datetime
 
 from app.db.mongodb import get_database
 from app.agents.scraper import EventScraper
+from app.services.currency import refresh_rates, reset_rates
 
 router = APIRouter(prefix="/scrape", tags=["scrape"])
 
@@ -23,6 +24,9 @@ async def run_scrape_task(url: str, source_name: str, max_pages: int):
     """Background task to run the scraper."""
     db = get_database()
     scraper = EventScraper()
+
+    reset_rates()
+    refresh_rates()
 
     try:
         events = await scraper.scrape(url, source_name, max_pages, db=db)

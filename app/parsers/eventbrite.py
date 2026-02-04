@@ -13,6 +13,8 @@ falls back to the Claude agentic flow.
 import json
 import re
 from datetime import datetime
+
+from app.services.currency import convert_to_sek
 from typing import Optional
 from urllib.parse import urljoin, urlparse, urlencode, parse_qs, urlunparse
 
@@ -312,6 +314,11 @@ class EventbriteParser(BaseEventParser):
                 text = tag.get_text(strip=True)
                 if text:
                     categories.append(text)
+
+        # ── Normalize currency to SEK ──
+        if price_currency != "SEK" and price_amount > 0:
+            price_amount = convert_to_sek(price_amount, price_currency)
+            price_currency = "SEK"
 
         # ── Build result ──
         venue = Venue(name=venue_name, address=venue_address)

@@ -11,6 +11,7 @@ import re
 
 from app.config import get_settings
 from app.models.event import EventCreate, Venue, Price
+from app.services.currency import convert_to_sek
 
 settings = get_settings()
 
@@ -533,9 +534,11 @@ Start by fetching the seed page.""",
 
         # Parse price
         price_amount = float(data.get("price_amount", 0) or 0)
-        price = Price.from_amount(
-            price_amount, data.get("price_currency", "SEK") or "SEK"
-        )
+        price_currency = data.get("price_currency", "SEK") or "SEK"
+        if price_currency != "SEK" and price_amount > 0:
+            price_amount = convert_to_sek(price_amount, price_currency)
+            price_currency = "SEK"
+        price = Price.from_amount(price_amount, price_currency)
 
         venue = Venue(
             name=venue_name,

@@ -168,6 +168,38 @@ class TestCreateEvent:
         assert event.is_online is False
         assert event.online_link is None
 
+    def test_non_sek_price_converted_to_sek(self):
+        """A price in USD should be converted to SEK before bucketing."""
+        scraper = self._make_scraper()
+        with patch("app.agents.scraper.convert_to_sek", return_value=260.0):
+            data = {
+                "title": "USD Event",
+                "venue_name": "Venue",
+                "source_url": "https://example.com/usd",
+                "price_amount": 25,
+                "price_currency": "USD",
+            }
+            event = scraper._create_event(data, "example.com")
+        assert event.price.currency == "SEK"
+        assert event.price.amount == 260.0
+        assert event.price.bucket == "standard"
+
+    def test_sek_price_not_converted(self):
+        """A SEK price should not trigger convert_to_sek."""
+        scraper = self._make_scraper()
+        with patch("app.agents.scraper.convert_to_sek") as mock_convert:
+            data = {
+                "title": "SEK Event",
+                "venue_name": "Venue",
+                "source_url": "https://example.com/sek",
+                "price_amount": 200,
+                "price_currency": "SEK",
+            }
+            event = scraper._create_event(data, "example.com")
+        mock_convert.assert_not_called()
+        assert event.price.amount == 200
+        assert event.price.currency == "SEK"
+
     def test_missing_required_fields_returns_none(self):
         """If title, venue_name, or source_url is missing, return None."""
         scraper = self._make_scraper()

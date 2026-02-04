@@ -9,6 +9,7 @@ Covers:
 """
 
 import pytest
+from unittest.mock import patch
 
 from app.parsers.base import BaseEventParser, ParserHealthCheck, ParserResult
 from app.parsers.eventbrite import (
@@ -390,6 +391,51 @@ class TestEventbriteParser:
         assert event is not None
         assert "aff=" not in event.source_url
         assert event.source_url == "https://www.eventbrite.com/e/jazz-night-12345"
+
+    def test_parse_event_converts_usd_to_sek(self):
+        """parse_event should convert USD prices to SEK."""
+        parser = EventbriteParser()
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        {
+            "@type": "Event",
+            "name": "USD Event",
+            "location": {"@type": "Place", "name": "Venue", "address": {"streetAddress": "Addr 1"}},
+            "startDate": "2025-06-01T20:00:00+02:00",
+            "offers": {"lowPrice": "25.0", "priceCurrency": "USD"}
+        }
+        </script>
+        </head><body></body></html>
+        """
+        with patch("app.parsers.eventbrite.convert_to_sek", return_value=250.0):
+            event = parser.parse_event(html, "https://www.eventbrite.com/e/usd-event")
+        assert event is not None
+        assert event.price.currency == "SEK"
+        assert event.price.amount == 250.0
+        assert event.price.bucket == "standard"
+
+    def test_parse_event_sek_not_converted(self):
+        """parse_event should not call convert_to_sek for SEK prices."""
+        parser = EventbriteParser()
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        {
+            "@type": "Event",
+            "name": "SEK Event",
+            "location": {"@type": "Place", "name": "Venue", "address": {"streetAddress": "Addr 1"}},
+            "startDate": "2025-06-01T20:00:00+02:00",
+            "offers": {"lowPrice": "150.0", "priceCurrency": "SEK"}
+        }
+        </script>
+        </head><body></body></html>
+        """
+        with patch("app.parsers.eventbrite.convert_to_sek") as mock_convert:
+            event = parser.parse_event(html, "https://www.eventbrite.com/e/sek-event")
+        mock_convert.assert_not_called()
+        assert event.price.amount == 150.0
+        assert event.price.currency == "SEK"
 
     def test_parse_event_free_event(self):
         """parse_event should handle events with no price (free)."""

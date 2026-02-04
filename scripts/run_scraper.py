@@ -20,6 +20,7 @@ from datetime import datetime
 
 from app.config import get_settings
 from app.agents.scraper import EventScraper
+from app.services.currency import refresh_rates, reset_rates, get_rates_source
 
 settings = get_settings()
 
@@ -55,6 +56,11 @@ async def run_scraper(url: str, source_name: str, max_pages: int = 5, parser_onl
     await db.events.create_index("source_url", unique=True)
 
     scraper = EventScraper()
+
+    # Fetch exchange rates once for this session
+    reset_rates()
+    rates = refresh_rates()
+    print(f"Exchange rates loaded ({get_rates_source()}): {len(rates)} currencies")
 
     try:
         # Scrape events
