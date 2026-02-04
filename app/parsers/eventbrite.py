@@ -29,6 +29,8 @@ from app.parsers.base import BaseEventParser, ParserHealthCheck
 EVENT_JSON_LD_TYPES = [
     "Event", "SocialEvent", "MusicEvent", "BusinessEvent",
     "EducationEvent", "ExhibitionEvent", "Festival", "Hackathon",
+    "SportsEvent", "TheaterEvent", "DanceEvent", "ComedyEvent",
+    "FoodEvent", "LiteraryEvent", "ScreeningEvent", "VisualArtsEvent",
 ]
 
 EVENT_TESTID_SELECTORS = {
@@ -154,10 +156,28 @@ class EventbriteParser(BaseEventParser):
                     ],
                 )
 
+    @staticmethod
+    def _clean_event_url(url: str) -> str:
+        """Strip tracking query params (aff, etc.) from Eventbrite event URLs."""
+        parsed = urlparse(url)
+        params = parse_qs(parsed.query)
+        # Remove known tracking params
+        for key in ("aff", "utm_source", "utm_medium", "utm_campaign", "utm_content", "utm_term"):
+            params.pop(key, None)
+        clean_query = urlencode(params, doseq=True)
+        return urlunparse(parsed._replace(query=clean_query))
+
     def extract_event_urls(self, html: str, base_url: str) -> list[str]:
         """Extract event detail URLs from an Eventbrite listing page."""
         soup = self._soup(html)
+        seen = set()
         urls = []
+
+        def _add(url: str) -> None:
+            clean = self._clean_event_url(url)
+            if clean not in seen:
+                seen.add(clean)
+                urls.append(clean)
 
         # Primary: a.event-card-link elements
         for link in self._select(soup, LISTING_SELECTORS["event_link"]):
@@ -165,7 +185,7 @@ class EventbriteParser(BaseEventParser):
             if href:
                 full_url = urljoin(base_url, href)
                 if "/e/" in full_url:
-                    urls.append(full_url)
+                    _add(full_url)
 
         # Fallback: JSON-LD ItemList
         if not urls:
@@ -175,7 +195,7 @@ class EventbriteParser(BaseEventParser):
                     item_data = item.get("item", item)
                     item_url = item_data.get("url", "")
                     if item_url and "/e/" in item_url:
-                        urls.append(item_url)
+                        _add(item_url)
 
         return urls
 
@@ -304,7 +324,7 @@ class EventbriteParser(BaseEventParser):
             datetime_start=datetime_start,
             datetime_end=datetime_end,
             price=price,
-            source_url=url,
+            source_url=self._clean_event_url(url),
             source_site=self.site_name,
             categories=categories,
             image_url=image_url,

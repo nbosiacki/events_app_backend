@@ -7,7 +7,7 @@ from functools import lru_cache
 
 class Settings(BaseSettings):
     # Environment
-    app_env: Literal["development", "test"] = "development"
+    app_env: Literal["development", "test", "seed"] = "development"
 
     # MongoDB
     mongodb_url: str = "mongodb://localhost:27017"
@@ -17,7 +17,8 @@ class Settings(BaseSettings):
     def derive_db_name(self) -> "Settings":
         """Derive database name from app_env if not explicitly set."""
         if not self.mongodb_db_name:
-            suffix = "dev" if self.app_env == "development" else "test"
+            env_to_suffix = {"development": "dev", "test": "test", "seed": "seed"}
+            suffix = env_to_suffix[self.app_env]
             self.mongodb_db_name = f"stockholm_events_{suffix}"
         return self
 

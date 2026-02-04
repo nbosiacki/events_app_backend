@@ -338,6 +338,59 @@ class TestEventbriteParser:
         assert event.venue.address is None
         assert event.online_link == "https://zoom.us/j/123"
 
+    def test_parse_sports_event(self):
+        """parse_event should handle SportsEvent @type."""
+        parser = EventbriteParser()
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        {
+            "@type": "SportsEvent",
+            "name": "Stockholm Marathon",
+            "location": {"@type": "Place", "name": "Stadion", "address": {"streetAddress": "Olympic Way 1"}},
+            "startDate": "2025-06-15T08:00:00+02:00",
+            "offers": {"lowPrice": "500", "priceCurrency": "SEK"}
+        }
+        </script>
+        </head><body></body></html>
+        """
+        event = parser.parse_event(html, "https://www.eventbrite.com/e/marathon-12345")
+        assert event is not None
+        assert event.title == "Stockholm Marathon"
+        assert event.venue.name == "Stadion"
+
+    def test_extract_event_urls_strips_tracking_params(self):
+        """extract_event_urls should strip ?aff= and other tracking params."""
+        parser = EventbriteParser()
+        html = """
+        <html><body>
+            <a class="event-card-link" href="/e/event-1?aff=ebdssbdestsearch">Event 1</a>
+            <a class="event-card-link" href="/e/event-1">Event 1 again</a>
+        </body></html>
+        """
+        urls = parser.extract_event_urls(html, "https://www.eventbrite.com/d/test/")
+        assert len(urls) == 1
+        assert "aff=" not in urls[0]
+
+    def test_clean_event_url_strips_aff(self):
+        """_clean_event_url should strip aff param but keep other params."""
+        clean = EventbriteParser._clean_event_url(
+            "https://www.eventbrite.com/e/test-12345?aff=ebdssbdestsearch&page=2"
+        )
+        assert "aff=" not in clean
+        assert "page=2" in clean
+
+    def test_parse_event_cleans_source_url(self):
+        """parse_event should strip tracking params from source_url."""
+        parser = EventbriteParser()
+        event = parser.parse_event(
+            HEALTHY_EVENT_HTML,
+            "https://www.eventbrite.com/e/jazz-night-12345?aff=ebdssbdestsearch",
+        )
+        assert event is not None
+        assert "aff=" not in event.source_url
+        assert event.source_url == "https://www.eventbrite.com/e/jazz-night-12345"
+
     def test_parse_event_free_event(self):
         """parse_event should handle events with no price (free)."""
         parser = EventbriteParser()

@@ -61,7 +61,7 @@ def main():
     parser.add_argument(
         "--env",
         default="development",
-        choices=["development", "test"],
+        choices=["development", "test", "seed"],
         help="Target environment (default: development)",
     )
     args = parser.parse_args()

@@ -392,12 +392,17 @@ Start by fetching the seed page.""",
             return await self._scrape_with_claude(seed_url, source_site, max_pages)
 
         # Step 2: Extract event URLs (with pagination)
-        event_urls_set = set(self.extract_urls_from_page(html, seed_url))
+        # Prefer parser's extract_event_urls() over generic regex when available
+        from app.parsers import get_parser_for_url as _get_parser
+        listing_parser = _get_parser(seed_url)
+
+        if listing_parser:
+            event_urls_set = set(listing_parser.extract_event_urls(html, seed_url))
+        else:
+            event_urls_set = set(self.extract_urls_from_page(html, seed_url))
         print(f"  Page 1: {len(event_urls_set)} event URLs")
 
         # Check for additional listing pages
-        from app.parsers import get_parser_for_url as _get_parser
-        listing_parser = _get_parser(seed_url)
         if listing_parser:
             total_pages = listing_parser.get_total_pages(html)
             pages_to_fetch = min(total_pages, max_pages)
@@ -407,7 +412,7 @@ Start by fetching the seed page.""",
                     page_url = listing_parser.get_page_url(seed_url, page)
                     page_html = self._fetch_raw_html(page_url)
                     if page_html:
-                        page_urls = set(self.extract_urls_from_page(page_html, page_url))
+                        page_urls = set(listing_parser.extract_event_urls(page_html, page_url))
                         new = page_urls - event_urls_set
                         event_urls_set |= page_urls
                         print(f"  Page {page}: {len(new)} new URLs ({len(event_urls_set)} total)")
