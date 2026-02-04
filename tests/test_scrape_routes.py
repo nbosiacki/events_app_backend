@@ -9,8 +9,7 @@ The actual scraping is done in a background task, so we only verify the
 HTTP response.  The background task's run_scrape_task function is mocked
 because FastAPI's test client executes background tasks inline (within
 the same request), which would hit the real Anthropic API.  Agent
-behavior is tested separately in test_scraper_agent.py and
-test_deduplicator_agent.py.
+behavior is tested separately in test_scraper_agent.py.
 """
 
 from unittest.mock import patch, AsyncMock
@@ -49,9 +48,7 @@ class TestRunScrapeTask:
 
     async def test_scraper_called_with_db(self, client):
         """run_scrape_task should pass db to scraper.scrape()."""
-        with patch("app.api.routes.scrape.EventScraper") as MockScraper, \
-             patch("app.api.routes.scrape.EventDeduplicator"):
-
+        with patch("app.api.routes.scrape.EventScraper") as MockScraper:
             mock_instance = MockScraper.return_value
             mock_instance.scrape = AsyncMock(return_value=[])
             mock_instance.close = lambda: None

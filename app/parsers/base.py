@@ -79,6 +79,16 @@ class BaseEventParser(ABC):
         """
         ...
 
+    # ── Pagination ─────────────────────────────────────────────────────
+
+    def get_total_pages(self, html: str) -> int:
+        """Return the total number of listing pages.
+
+        Override in subclasses that support paginated listing pages.
+        Default: 1 (no pagination).
+        """
+        return 1
+
     # ── Concrete helpers ──────────────────────────────────────────────
 
     def _soup(self, html: str) -> BeautifulSoup:

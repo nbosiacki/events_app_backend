@@ -1,7 +1,9 @@
+import csv
 import httpx
 from bs4 import BeautifulSoup
 from anthropic import Anthropic
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin, urlparse
 import json
@@ -346,7 +348,8 @@ Start by fetching the seed page.""",
         return all_events
 
     async def scrape(
-        self, seed_url: str, source_site: str, max_pages: int = 5, db=None
+        self, seed_url: str, source_site: str, max_pages: int = 5, db=None,
+        parser_only: bool = False,
     ) -> list[EventCreate]:
         """
         Scrape events from a website using a three-tier strategy.
@@ -358,19 +361,24 @@ Start by fetching the seed page.""",
         4. Fall back to Claude agentic scraping for remaining URLs
 
         When db is None, uses the original Claude-only flow for backward
-        compatibility.
+        compatibility (unless parser_only is True).
 
         Args:
             seed_url: Starting URL to scrape
             source_site: Name of the source (e.g., "eventbrite.com")
             max_pages: Maximum number of pages to fetch
             db: Optional Motor database instance for URL pre-checking
+            parser_only: If True, never fall back to Claude — only use
+                site parsers.  Useful for debugging parser extraction.
 
         Returns:
             List of EventCreate objects
         """
         if db is None:
-            return await self._scrape_with_claude(seed_url, source_site, max_pages)
+            if parser_only:
+                print("  parser-only mode: skipping Claude (no db provided)")
+            else:
+                return await self._scrape_with_claude(seed_url, source_site, max_pages)
 
         all_events = []
         claude_urls = []
@@ -379,30 +387,61 @@ Start by fetching the seed page.""",
         html = self._fetch_raw_html(seed_url)
         if not html:
             print(f"  Failed to fetch listing page: {seed_url}")
+            if parser_only:
+                return []
             return await self._scrape_with_claude(seed_url, source_site, max_pages)
 
-        # Step 2: Extract event URLs
-        event_urls = self.extract_urls_from_page(html, seed_url)
-        print(f"  Found {len(event_urls)} event URLs on listing page")
+        # Step 2: Extract event URLs (with pagination)
+        event_urls_set = set(self.extract_urls_from_page(html, seed_url))
+        print(f"  Page 1: {len(event_urls_set)} event URLs")
+
+        # Check for additional listing pages
+        from app.parsers import get_parser_for_url as _get_parser
+        listing_parser = _get_parser(seed_url)
+        if listing_parser:
+            total_pages = listing_parser.get_total_pages(html)
+            pages_to_fetch = min(total_pages, max_pages)
+            if pages_to_fetch > 1:
+                print(f"  Pagination: {total_pages} pages detected, fetching {pages_to_fetch}")
+                for page in range(2, pages_to_fetch + 1):
+                    page_url = listing_parser.get_page_url(seed_url, page)
+                    page_html = self._fetch_raw_html(page_url)
+                    if page_html:
+                        page_urls = set(self.extract_urls_from_page(page_html, page_url))
+                        new = page_urls - event_urls_set
+                        event_urls_set |= page_urls
+                        print(f"  Page {page}: {len(new)} new URLs ({len(event_urls_set)} total)")
+
+        event_urls = sorted(event_urls_set)
+        print(f"  Total unique event URLs: {len(event_urls)}")
 
         if not event_urls:
+            if parser_only:
+                print("  parser-only mode: no event URLs found, nothing to parse")
+                return []
             # No extractable URLs — fall back to Claude for the whole flow
             return await self._scrape_with_claude(seed_url, source_site, max_pages)
 
         # Step 3: Pre-check against database
-        new_urls = await self.filter_known_urls(event_urls, db)
-        skipped = len(event_urls) - len(new_urls)
-        print(f"  URL pre-check: {len(new_urls)} new, {skipped} already known")
+        if db is not None:
+            new_urls = await self.filter_known_urls(event_urls, db)
+            skipped = len(event_urls) - len(new_urls)
+            print(f"  URL pre-check: {len(new_urls)} new, {skipped} already known")
+        else:
+            new_urls = event_urls
 
         if not new_urls:
             print("  All URLs already known — nothing to scrape")
             return []
 
         # Step 4: Try site parser, then Claude fallback
+        failed_parses = []
+
         for url in new_urls:
             event_html = self._fetch_raw_html(url)
             if not event_html:
                 claude_urls.append(url)
+                failed_parses.append((url, "fetch_failed"))
                 continue
 
             parsed = self.try_site_parser(url, event_html)
@@ -411,16 +450,42 @@ Start by fetching the seed page.""",
                 all_events.extend(parsed)
             else:
                 claude_urls.append(url)
+                failed_parses.append((url, "parser_failed"))
 
         # Step 5: Run Claude on remaining URLs
-        if claude_urls:
+        if claude_urls and not parser_only:
             print(f"  Claude fallback for {len(claude_urls)} URL(s)")
             claude_events = await self._scrape_with_claude(
                 seed_url, source_site, max_pages
             )
             all_events.extend(claude_events)
+        elif claude_urls and parser_only:
+            print(f"  parser-only mode: skipped Claude fallback for {len(claude_urls)} URL(s)")
+
+        # Step 6: Write failed parses to CSV for troubleshooting
+        if failed_parses:
+            self._write_failed_csv(failed_parses, source_site)
 
         return all_events
+
+    def _write_failed_csv(
+        self, failed: list[tuple[str, str]], source_site: str
+    ) -> None:
+        """Write failed parse URLs to a timestamped CSV for troubleshooting."""
+        logs_dir = Path(__file__).parent.parent.parent / "logs"
+        logs_dir.mkdir(exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        csv_path = logs_dir / f"failed_parses_{timestamp}.csv"
+
+        with open(csv_path, "w", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow(["url", "reason", "source_site", "timestamp"])
+            ts = datetime.now().isoformat()
+            for url, reason in failed:
+                writer.writerow([url, reason, source_site, ts])
+
+        print(f"  Failed parses logged to {csv_path} ({len(failed)} URLs)")
 
     def _create_event(
         self, data: dict, source_site: str

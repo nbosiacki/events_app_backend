@@ -183,21 +183,57 @@ def run_health(url: str, verbose: bool):
         for sel in health.missing_selectors:
             print(f"    {RED}✗{RESET} {sel}")
 
-    # Show what selectors were found
+    # Show extraction details
     if verbose:
         soup = BeautifulSoup(html, "lxml")
         is_detail = "/e/" in url
-        from app.parsers.eventbrite import LISTING_SELECTORS, EVENT_SELECTORS
-        selectors = EVENT_SELECTORS if is_detail else LISTING_SELECTORS
+        from app.parsers.eventbrite import (
+            LISTING_SELECTORS, EVENT_TESTID_SELECTORS, EVENT_JSON_LD_TYPES,
+        )
 
-        print(_section("Selector Details"))
-        for name, selector in selectors.items():
-            matches = soup.select(selector)
-            if matches:
-                text = matches[0].get_text(strip=True)[:60]
-                print(f"  {GREEN}✓{RESET} {name}: {selector}  →  {DIM}{text}{RESET}")
+        if is_detail:
+            # JSON-LD details
+            print(_section("JSON-LD Structured Data"))
+            json_ld = parser._extract_json_ld(soup, EVENT_JSON_LD_TYPES)
+            if json_ld:
+                print(f"  {GREEN}✓{RESET} @type: {json_ld.get('@type', '?')}")
+                for key in ["name", "description", "startDate", "endDate", "image", "eventAttendanceMode"]:
+                    val = json_ld.get(key, "")
+                    status = GREEN + "✓" if val else RED + "✗"
+                    display = str(val)[:60] if val else "(missing)"
+                    print(f"  {status}{RESET} {key}: {DIM}{display}{RESET}")
+                loc = json_ld.get("location", {})
+                if isinstance(loc, dict):
+                    print(f"  {GREEN}✓{RESET} location.name: {DIM}{loc.get('name', '?')}{RESET}")
+                    addr = loc.get("address", {})
+                    if isinstance(addr, dict):
+                        print(f"  {GREEN}✓{RESET} location.address: {DIM}{addr.get('streetAddress', '?')}{RESET}")
+                offers = json_ld.get("offers", {})
+                if isinstance(offers, list) and offers:
+                    offers = offers[0]
+                if isinstance(offers, dict):
+                    print(f"  {GREEN}✓{RESET} offers: {DIM}{offers.get('lowPrice', '?')} {offers.get('priceCurrency', '?')}{RESET}")
             else:
-                print(f"  {RED}✗{RESET} {name}: {selector}")
+                print(f"  {RED}✗{RESET} No JSON-LD with event type found")
+
+            # data-testid details
+            print(_section("data-testid Selectors"))
+            for name, selector in EVENT_TESTID_SELECTORS.items():
+                matches = soup.select(selector)
+                if matches:
+                    text = matches[0].get_text(strip=True)[:60]
+                    print(f"  {GREEN}✓{RESET} {name}: {selector}  →  {DIM}{text}{RESET}")
+                else:
+                    print(f"  {RED}✗{RESET} {name}: {selector}")
+        else:
+            print(_section("Listing Selectors"))
+            for name, selector in LISTING_SELECTORS.items():
+                matches = soup.select(selector)
+                count = len(matches)
+                if matches:
+                    print(f"  {GREEN}✓{RESET} {name}: {selector}  →  {DIM}{count} found{RESET}")
+                else:
+                    print(f"  {RED}✗{RESET} {name}: {selector}")
 
 
 # ── Dry-run mode ────────────────────────────────────────────────────
@@ -211,7 +247,10 @@ def run_dry_run(url: str, verbose: bool):
 
     from app.parsers import get_parser_for_url
 
-    # Extract URLs
+    # Find parser for the seed URL
+    listing_parser = get_parser_for_url(url)
+
+    # Extract URLs from page 1
     with _suppress_anthropic():
         from app.agents.scraper import EventScraper
         scraper = EventScraper.__new__(EventScraper)
@@ -220,37 +259,64 @@ def run_dry_run(url: str, verbose: bool):
             headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
         )
 
-    event_urls = scraper.extract_urls_from_page(html, url)
-    print(f"\n  Extracted {len(event_urls)} event URL(s)")
+    all_event_urls = set(scraper.extract_urls_from_page(html, url))
+    print(f"\n  Page 1: {len(all_event_urls)} event URL(s)")
 
-    # Try parser
-    parser = get_parser_for_url(url)
+    # Pagination: fetch additional pages
+    total_pages = 1
+    if listing_parser:
+        total_pages = listing_parser.get_total_pages(html)
+
+    if total_pages > 1:
+        print(f"  Pagination: {total_pages} pages detected")
+        for page in range(2, total_pages + 1):
+            page_url = listing_parser.get_page_url(url, page)
+            try:
+                page_html, page_info = fetch_page(page_url)
+                page_urls = set(scraper.extract_urls_from_page(page_html, page_url))
+                new = page_urls - all_event_urls
+                all_event_urls |= page_urls
+                print(f"  Page {page}: {len(new)} new URL(s) ({len(all_event_urls)} total)")
+            except Exception as e:
+                print(f"  Page {page}: {RED}fetch failed ({e}){RESET}")
+
+    all_event_urls = sorted(all_event_urls)
+    print(f"\n  Total unique event URLs: {len(all_event_urls)}")
+
+    # Listing health check
+    if listing_parser:
+        print(f"  Listing parser: {listing_parser.site_name}")
+        health = listing_parser.health_check(html, url)
+        status = _colored("PASS", GREEN) if health.is_healthy else _colored("FAIL", RED)
+        print(f"  Listing health: {status} — {health.message}")
+
+    # Parse each event URL individually
     parser_events = []
     parser_failures = []
 
-    if parser:
-        print(f"  Parser: {parser.site_name}")
-        health = parser.health_check(html, url)
-        status = _colored("PASS", GREEN) if health.is_healthy else _colored("FAIL", RED)
-        print(f"  Health: {status} — {health.message}")
+    for eu in all_event_urls:
+        # Find parser for this specific event URL
+        event_parser = get_parser_for_url(eu)
+        if not event_parser:
+            parser_failures.append((eu, "no parser match"))
+            continue
 
-        if not health.is_healthy:
-            print(f"  → Claude fallback would be triggered")
+        try:
+            event_html, _ = fetch_page(eu)
+            health = event_parser.health_check(event_html, eu)
+            if not health.is_healthy:
+                parser_failures.append((eu, f"health check failed: {health.message}"))
+                continue
 
-        # Try parsing each event URL
-        for eu in event_urls[:10]:
-            try:
-                event_html, _ = fetch_page(eu)
-                event = parser.parse_event(event_html, eu)
-                if event:
-                    parser_events.append(event)
-                else:
-                    parser_failures.append(eu)
-            except Exception as e:
-                parser_failures.append(f"{eu} ({e})")
-    else:
-        print(f"  {YELLOW}No parser — all URLs would go to Claude{RESET}")
-        parser_failures = event_urls
+            event = event_parser.parse_event(event_html, eu)
+            if event:
+                parser_events.append(event)
+                if verbose:
+                    print(f"  {GREEN}✓{RESET} {event.title[:60]}")
+            else:
+                parser_failures.append((eu, "parse_event returned None"))
+        except Exception as e:
+            parser_failures.append((eu, str(e)))
 
     # Summary
     print(_section("Results"))
@@ -269,6 +335,12 @@ def run_dry_run(url: str, verbose: bool):
             print(f"    URL:      {event.source_url}")
             if event.categories:
                 print(f"    Tags:     {', '.join(event.categories)}")
+
+    if parser_failures:
+        print(_section("Failed Parses"))
+        for fail_url, reason in parser_failures:
+            print(f"  {RED}✗{RESET} {reason}")
+            print(f"    {DIM}{fail_url}{RESET}")
 
     scraper.http_client.close()
 
@@ -326,11 +398,23 @@ def run_compare(url: str, verbose: bool):
         else:
             print(f"  {DIM}{tag_name}: (not found){RESET}")
 
-    # Show parser-specific selectors if available
+    # Show parser-specific extraction details
     if parser:
-        from app.parsers.eventbrite import EVENT_SELECTORS
-        print(_section("Parser Selectors vs HTML"))
-        for name, selector in EVENT_SELECTORS.items():
+        from app.parsers.eventbrite import EVENT_TESTID_SELECTORS, EVENT_JSON_LD_TYPES
+
+        print(_section("JSON-LD Data"))
+        json_ld = parser._extract_json_ld(soup, EVENT_JSON_LD_TYPES)
+        if json_ld:
+            for key in ["name", "startDate", "endDate", "image", "eventAttendanceMode"]:
+                val = json_ld.get(key, "")
+                status = GREEN + "✓" if val else RED + "✗"
+                display = str(val)[:60] if val else "(missing)"
+                print(f"  {status}{RESET} {key}: {DIM}{display}{RESET}")
+        else:
+            print(f"  {RED}✗{RESET} No JSON-LD event data found")
+
+        print(_section("data-testid Selectors vs HTML"))
+        for name, selector in EVENT_TESTID_SELECTORS.items():
             matches = soup.select(selector)
             if matches:
                 text = matches[0].get_text(strip=True)[:60]

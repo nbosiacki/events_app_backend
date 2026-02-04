@@ -14,7 +14,7 @@ FastAPI backend for the Stockholm Events app. Handles event storage, user authen
 - [API Routes](#api-routes)
 - [Authentication](#authentication)
 - [Models](#models)
-- [Agents (Scraper & Deduplicator)](#agents-scraper--deduplicator)
+- [Agents (Scraper)](#agents-scraper)
 - [Scripts](#scripts)
 - [Testing](#testing)
 - [Configuration](#configuration)
@@ -52,8 +52,7 @@ backend/
 │   │   ├── preferences.py         # Implicit preference analysis
 │   │   └── recommendations.py     # Event relevance scoring
 │   ├── agents/
-│   │   ├── scraper.py             # Claude-powered web scraper (tool use)
-│   │   └── deduplicator.py        # Claude-powered duplicate detection
+│   │   └── scraper.py             # Claude-powered web scraper (tool use)
 │   ├── models/
 │   │   ├── event.py               # Event, Price, Venue, EventResponse
 │   │   └── user.py                # User, UserPreferences
@@ -73,7 +72,6 @@ backend/
 │   ├── test_preferences.py        # Implicit preference analysis tests
 │   ├── test_recommendations.py    # Recommendation scoring tests
 │   ├── test_scraper_agent.py      # Scraper agent tests (mocked Anthropic)
-│   ├── test_deduplicator_agent.py # Deduplicator tests (mocked Anthropic)
 │   ├── test_scrape_routes.py      # Scrape endpoint tests
 │   └── test_seed_data.py          # Seed data generation tests
 ├── requirements.txt
@@ -314,7 +312,7 @@ JWT-based authentication with access/refresh token pair. See `app/auth/README.md
 - Engagement: liked_events (list of event IDs), attended_events (list of event IDs)
 - `UserPreferences`: preferred_categories, max_price_bucket, preferred_areas
 
-## Agents (Scraper & Deduplicator)
+## Agents (Scraper)
 
 ### Scraper (`app/agents/scraper.py`)
 
@@ -325,20 +323,14 @@ Claude-powered web scraper using tool use. No hardcoded selectors — Claude rea
 - `extract_events(events)` — normalize found events into schema
 - `done(summary)` — signal completion
 
-### Deduplicator (`app/agents/deduplicator.py`)
-
-Claude-powered duplicate detection for incoming events.
-
-1. Check if `source_url` already exists (fast path)
-2. Use Claude to fuzzy-match against existing events (handles spelling variations, venue name differences)
-3. Merge data if duplicate found (keeps richer data from both records)
+Events are deduplicated by `source_url` — if a URL already exists in the database, the event is skipped.
 
 ## Scripts
 
 | Script | Command | Description |
 |--------|---------|-------------|
 | `seed_data.py` | `python -m scripts.seed_data [--count N] [--clear] [--env dev\|test]` | Generate dummy events + dev user |
-| `run_scraper.py` | `python -m scripts.run_scraper --source eventbrite` | Trigger scraper from CLI |
+| `run_scraper.py` | `python -m scripts.run_scraper --source eventbrite [--parser-only]` | Trigger scraper from CLI (`--parser-only` disables Claude fallback) |
 | `inspect_user.py` | `python -m scripts.inspect_user [--email EMAIL] [--env dev\|test]` | Inspect user account state |
 
 ## Testing
@@ -368,7 +360,6 @@ APP_ENV=test pytest tests/test_events_routes.py::TestSortParameter -v
 | `test_preferences.py` | Implicit preference analysis (category weights, avg price) |
 | `test_recommendations.py` | Scoring functions (category, price, freshness, combined) |
 | `test_scraper_agent.py` | Scraper flow with mocked Anthropic API |
-| `test_deduplicator_agent.py` | Duplicate detection and event merging |
 | `test_scrape_routes.py` | Scrape trigger endpoint |
 | `test_seed_data.py` | Seed data templates and generation logic |
 
@@ -380,7 +371,7 @@ APP_ENV=test pytest tests/test_events_routes.py::TestSortParameter -v
 |----------|-------------|---------|
 | `APP_ENV` | Environment name (`development` / `test`) | `development` |
 | `MONGODB_URL` | MongoDB connection string | `mongodb://localhost:27017` |
-| `ANTHROPIC_API_KEY` | Claude API key for scraper/deduplicator | (required) |
+| `ANTHROPIC_API_KEY` | Claude API key for scraper fallback | (required) |
 | `JWT_SECRET_KEY` | Secret for signing JWT tokens | (required) |
 | `JWT_ALGORITHM` | JWT signing algorithm | `HS256` |
 | `ACCESS_TOKEN_EXPIRE_MINUTES` | Access token TTL | `30` |

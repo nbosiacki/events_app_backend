@@ -14,7 +14,8 @@ from app.parsers.base import BaseEventParser, ParserHealthCheck, ParserResult
 from app.parsers.eventbrite import (
     EventbriteParser,
     LISTING_SELECTORS,
-    EVENT_SELECTORS,
+    EVENT_TESTID_SELECTORS,
+    EVENT_JSON_LD_TYPES,
 )
 from app.parsers.registry import (
     register_parser,
@@ -29,15 +30,7 @@ from app.parsers.registry import (
 HEALTHY_LISTING_HTML = """
 <html>
 <body>
-    <div class="event-card-details">
-        <h2>Jazz Night at Stampen</h2>
-        <p>June 1, 2025</p>
-    </div>
     <a class="event-card-link" href="/e/jazz-night-12345">Jazz Night</a>
-    <div class="event-card-details">
-        <h2>Rock Festival</h2>
-        <p>June 5, 2025</p>
-    </div>
     <a class="event-card-link" href="/e/rock-festival-67890">Rock Festival</a>
 </body>
 </html>
@@ -45,18 +38,39 @@ HEALTHY_LISTING_HTML = """
 
 HEALTHY_EVENT_HTML = """
 <html>
+<head>
+<script type="application/ld+json">
+{
+    "@type": "SocialEvent",
+    "name": "Jazz Night at Stampen",
+    "description": "A wonderful evening of jazz music in Old Town.",
+    "image": "https://img.example.com/jazz.jpg",
+    "location": {
+        "@type": "Place",
+        "name": "Stampen",
+        "address": {
+            "@type": "PostalAddress",
+            "streetAddress": "Stora Nygatan 5, Stockholm",
+            "addressLocality": "Stockholm",
+            "addressCountry": "SE"
+        }
+    },
+    "startDate": "2025-06-01T20:00:00+02:00",
+    "endDate": "2025-06-01T23:00:00+02:00",
+    "offers": {
+        "@type": "AggregateOffer",
+        "lowPrice": "150.0",
+        "priceCurrency": "SEK"
+    },
+    "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode"
+}
+</script>
+</head>
 <body>
-    <h1 class="event-title">Jazz Night at Stampen</h1>
-    <div class="event-description">A wonderful evening of jazz music in Old Town.</div>
-    <div class="location-info">
-        <p class="location-info__address-text">Stampen</p>
-        <div class="location-info__address">Stora Nygatan 5, Stockholm</div>
-    </div>
-    <span class="date-info__full-datetime">2025-06-01T20:00:00</span>
-    <div class="conversion-bar__panel-info"><span>150 SEK</span></div>
-    <picture class="listing-hero-image"><img src="https://img.example.com/jazz.jpg" /></picture>
-    <li class="tags-link"><a>jazz</a></li>
-    <li class="tags-link"><a>music</a></li>
+    <h1 data-testid="event-title">Jazz Night at Stampen</h1>
+    <a data-testid="event-venue">Stampen, Stockholm</a>
+    <div data-testid="event-datetime">Sunday, Jun 1 from 8:00 pm to 11:00 pm CET</div>
+    <div data-testid="event-tags"><a>jazz</a><a>music</a></div>
 </body>
 </html>
 """
@@ -154,6 +168,59 @@ class TestEventbriteParser:
         url = "https://www.visitstockholm.com/events/"
         assert not any(p.search(url) for p in patterns)
 
+    def test_url_pattern_all_events(self):
+        """All-events listing URL should match."""
+        parser = EventbriteParser()
+        import re
+        patterns = [re.compile(p) for p in parser.url_patterns]
+        url = "https://www.eventbrite.com/d/sweden--stockholm/all-events/"
+        assert any(p.search(url) for p in patterns)
+
+    def test_url_pattern_category_listing(self):
+        """Category listing URL should match."""
+        parser = EventbriteParser()
+        import re
+        patterns = [re.compile(p) for p in parser.url_patterns]
+        url = "https://www.eventbrite.com/d/sweden--stockholm/music/"
+        assert any(p.search(url) for p in patterns)
+
+    def test_url_pattern_regional_domains(self):
+        """Regional Eventbrite domains (.se, .co.uk, .sg) should match."""
+        parser = EventbriteParser()
+        import re
+        patterns = [re.compile(p) for p in parser.url_patterns]
+        for domain in ["eventbrite.se", "eventbrite.co.uk", "eventbrite.sg"]:
+            url = f"https://www.{domain}/e/some-event-12345"
+            assert any(p.search(url) for p in patterns), f"{domain} should match"
+
+    def test_get_total_pages_with_pagination(self):
+        """get_total_pages should extract page count from pagination element."""
+        parser = EventbriteParser()
+        html = '<html><body><li data-testid="pagination-parent"><span>1</span>of 7</li></body></html>'
+        assert parser.get_total_pages(html) == 7
+
+    def test_get_total_pages_no_pagination(self):
+        """get_total_pages should return 1 when no pagination element exists."""
+        parser = EventbriteParser()
+        html = "<html><body><p>No pagination</p></body></html>"
+        assert parser.get_total_pages(html) == 1
+
+    def test_get_page_url(self):
+        """get_page_url should append ?page=N to listing URL."""
+        url = EventbriteParser.get_page_url(
+            "https://www.eventbrite.com/d/sweden--stockholm/all-events/", 3
+        )
+        assert "page=3" in url
+        assert url.startswith("https://www.eventbrite.com/d/sweden--stockholm/all-events/")
+
+    def test_get_page_url_preserves_params(self):
+        """get_page_url should preserve existing query params."""
+        url = EventbriteParser.get_page_url(
+            "https://www.eventbrite.com/d/sweden--stockholm/all-events/?q=jazz", 2
+        )
+        assert "page=2" in url
+        assert "q=jazz" in url
+
     def test_health_check_healthy_listing(self):
         """Health check should pass for HTML with all listing selectors."""
         parser = EventbriteParser()
@@ -212,32 +279,56 @@ class TestEventbriteParser:
     def test_parse_event_missing_title(self):
         """parse_event should return None if title is missing."""
         parser = EventbriteParser()
-        html = "<html><body><div class='location-info'><p class='location-info__address-text'>Venue</p></div></body></html>"
+        html = "<html><body><p>No event data here</p></body></html>"
         event = parser.parse_event(html, "https://www.eventbrite.com/e/test")
         assert event is None
 
     def test_parse_event_missing_venue(self):
         """parse_event should return None if venue is missing."""
         parser = EventbriteParser()
-        html = "<html><body><h1 class='event-title'>Title</h1></body></html>"
+        html = '<html><body><h1 data-testid="event-title">Title</h1></body></html>'
         event = parser.parse_event(html, "https://www.eventbrite.com/e/test")
         assert event is None
 
-    def test_parse_online_event(self):
-        """parse_event should detect online events and set is_online=True."""
+    def test_parse_event_testid_fallback(self):
+        """parse_event should extract from data-testid when no JSON-LD."""
         parser = EventbriteParser()
         html = """
         <html><body>
-            <h1 class="event-title">Remote Workshop</h1>
-            <div class="event-description">Learn from home.</div>
-            <div class="location-info">
-                <p class="location-info__address-text">Online Event</p>
-                <div class="location-info__address">Online</div>
-            </div>
-            <span class="date-info__full-datetime">2025-06-01T14:00:00</span>
-            <div class="conversion-bar__panel-info"><span>Free</span></div>
-            <picture class="listing-hero-image"><img src="https://img.test.com/online.jpg" /></picture>
-            <li class="tags-link"><a>workshop</a></li>
+            <h1 data-testid="event-title">Testid Event</h1>
+            <a data-testid="event-venue">Fallback Venue</a>
+            <div data-testid="event-datetime">Monday, Jun 2 from 7:00 pm</div>
+            <div data-testid="event-tags"><a>tag1</a><a>tag2</a></div>
+        </body></html>
+        """
+        event = parser.parse_event(html, "https://www.eventbrite.com/e/testid-event")
+        assert event is not None
+        assert event.title == "Testid Event"
+        assert event.venue.name == "Fallback Venue"
+        assert event.price.amount == 0
+        assert event.price.bucket == "free"
+        assert "tag1" in event.categories
+
+    def test_parse_online_event(self):
+        """parse_event should detect online events via eventAttendanceMode."""
+        parser = EventbriteParser()
+        html = """
+        <html><head>
+        <script type="application/ld+json">
+        {
+            "@type": "Event",
+            "name": "Remote Workshop",
+            "description": "Learn from home.",
+            "image": "https://img.test.com/online.jpg",
+            "location": {"@type": "VirtualLocation", "name": "Online Event", "url": "https://zoom.us/j/123"},
+            "startDate": "2025-06-01T14:00:00+02:00",
+            "offers": {"lowPrice": "0.0", "priceCurrency": "SEK"},
+            "eventAttendanceMode": "https://schema.org/OnlineEventAttendanceMode"
+        }
+        </script>
+        </head><body>
+            <h1 data-testid="event-title">Remote Workshop</h1>
+            <div data-testid="event-tags"><a>workshop</a></div>
         </body></html>
         """
         event = parser.parse_event(html, "https://www.eventbrite.com/e/remote-workshop")
@@ -245,17 +336,23 @@ class TestEventbriteParser:
         assert event.title == "Remote Workshop"
         assert event.is_online is True
         assert event.venue.address is None
+        assert event.online_link == "https://zoom.us/j/123"
 
     def test_parse_event_free_event(self):
         """parse_event should handle events with no price (free)."""
         parser = EventbriteParser()
         html = """
-        <html><body>
-            <h1 class="event-title">Free Event</h1>
-            <div class="location-info">
-                <p class="location-info__address-text">Park</p>
-            </div>
-        </body></html>
+        <html><head>
+        <script type="application/ld+json">
+        {
+            "@type": "SocialEvent",
+            "name": "Free Event",
+            "location": {"@type": "Place", "name": "Park"},
+            "startDate": "2025-06-01T12:00:00+02:00",
+            "offers": {"lowPrice": "0.0", "priceCurrency": "SEK"}
+        }
+        </script>
+        </head><body></body></html>
         """
         event = parser.parse_event(html, "https://www.eventbrite.com/e/free")
         assert event is not None

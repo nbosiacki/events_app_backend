@@ -448,19 +448,28 @@ class TestTrySiteParser:
         """If parser is healthy and can extract, should return events."""
         scraper = self._make_scraper()
 
-        # Build HTML that passes Eventbrite's event detail health check
+        # Build HTML that passes Eventbrite's health check (JSON-LD)
         html = """
-        <html><body>
-            <h1 class="event-title">Test Event</h1>
-            <div class="event-description">A test event.</div>
-            <div class="location-info">
-                <p class="location-info__address-text">Test Venue</p>
-                <div class="location-info__address">Test Address</div>
-            </div>
-            <span class="date-info__full-datetime">2025-06-01T20:00:00</span>
-            <div class="conversion-bar__panel-info"><span>100 SEK</span></div>
-            <picture class="listing-hero-image"><img src="https://img.test.com/event.jpg" /></picture>
-            <li class="tags-link"><a>music</a></li>
+        <html><head>
+        <script type="application/ld+json">
+        {
+            "@type": "SocialEvent",
+            "name": "Test Event",
+            "description": "A test event.",
+            "location": {
+                "@type": "Place",
+                "name": "Test Venue",
+                "address": {"@type": "PostalAddress", "streetAddress": "Test Address"}
+            },
+            "startDate": "2025-06-01T20:00:00+02:00",
+            "offers": {"lowPrice": "100.0", "priceCurrency": "SEK"},
+            "image": "https://img.test.com/event.jpg",
+            "eventAttendanceMode": "https://schema.org/OfflineEventAttendanceMode"
+        }
+        </script>
+        </head><body>
+            <h1 data-testid="event-title">Test Event</h1>
+            <div data-testid="event-tags"><a>music</a></div>
         </body></html>
         """
         result = scraper.try_site_parser(
