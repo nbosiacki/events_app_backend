@@ -2,7 +2,8 @@
 Tests for the /api/events endpoints.
 
 Covers:
-    GET  /api/events         – listing with date, price, pagination, and sort filters
+    GET  /api/events/cities  – distinct city listing
+    GET  /api/events         – listing with date, price, pagination, city, and sort filters
     GET  /api/events/{id}    – single event retrieval, 404, and invalid ObjectId
     POST /api/events         – creation and duplicate source_url rejection (409)
     DELETE /api/events/{id}  – deletion, 404, and invalid ObjectId
@@ -13,6 +14,61 @@ setup_db fixture from conftest.py.
 
 from datetime import datetime, timezone
 from bson import ObjectId
+
+
+class TestGetCities:
+    """GET /api/events/cities — distinct city listing."""
+
+    async def test_empty_database_returns_empty_list(self, client):
+        response = await client.get("/api/events/cities")
+        assert response.status_code == 200
+        assert response.json() == []
+
+    async def test_returns_distinct_sorted_cities(self, client, setup_db):
+        from app.db import mongodb
+
+        rows = [
+            ("Malmö", "malmo-1"),
+            ("Stockholm", "stockholm-1"),
+            ("Gothenburg", "gbg-1"),
+            ("Stockholm", "stockholm-2"),  # duplicate city, different event
+        ]
+        for city, slug in rows:
+            await mongodb.db.events.insert_one({
+                "title": f"Event in {city}",
+                "venue": {"name": "Venue"},
+                "city": city,
+                "datetime_start": datetime(2025, 4, 1, 10, 0),
+                "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+                "source_url": f"https://example.com/{slug}",
+                "source_site": "example.com",
+                "categories": [],
+                "scraped_at": datetime.now(timezone.utc),
+            })
+
+        response = await client.get("/api/events/cities")
+        assert response.status_code == 200
+        cities = response.json()
+        assert cities == sorted({"Malmö", "Stockholm", "Gothenburg"})
+
+    async def test_excludes_null_city(self, client, setup_db):
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "No City Event",
+            "venue": {"name": "Venue"},
+            "city": None,
+            "datetime_start": datetime(2025, 4, 1, 10, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/no-city",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        response = await client.get("/api/events/cities")
+        assert response.status_code == 200
+        assert response.json() == []
 
 
 class TestGetEvents:
@@ -57,6 +113,32 @@ class TestGetEvents:
         response = await client.get("/api/events?price_bucket=free")
         assert response.status_code == 200
         assert len(response.json()) == 0
+
+    async def test_city_filter_matches(self, client, sample_event):
+        """Filtering by the event's city should return it (case-insensitive)."""
+        response = await client.get("/api/events?city=stockholm")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+
+    async def test_city_filter_case_insensitive(self, client, sample_event):
+        """City filter should be case-insensitive."""
+        response = await client.get("/api/events?city=STOCKHOLM")
+        assert response.status_code == 200
+        assert len(response.json()) == 1
+
+    async def test_city_filter_excludes(self, client, sample_event):
+        """Filtering by a different city should return no results."""
+        response = await client.get("/api/events?city=gothenburg")
+        assert response.status_code == 200
+        assert len(response.json()) == 0
+
+    async def test_city_field_in_response(self, client, sample_event):
+        """The city field should be present in the response."""
+        response = await client.get("/api/events")
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data) == 1
+        assert data[0]["city"] == "Stockholm"
 
     async def test_limit_parameter(self, client, setup_db):
         """The limit parameter should cap the number of returned events."""
@@ -401,6 +483,107 @@ class TestSortParameter:
         data = response.json()
         assert data[0]["like_count"] == 7
         assert data[0]["attend_count"] == 3
+
+
+class TestNearbySortParameter:
+    """GET /api/events?sort=nearby — sort by distance from user location."""
+
+    async def test_nearby_sort_orders_by_distance(self, client, setup_db):
+        """Events closer to the user should appear first."""
+        from app.db import mongodb
+
+        # Stockholm city centre: ~59.33, 18.07
+        # Gothenburg centre: ~57.71, 11.97
+        # User is in Stockholm — Stockholm event should rank first
+        await mongodb.db.events.insert_one({
+            "title": "Gothenburg Gig",
+            "venue": {"name": "Gothenburg Venue", "coordinates": [57.71, 11.97]},
+            "datetime_start": datetime(2025, 4, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/gbg",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Stockholm Show",
+            "venue": {"name": "Stockholm Venue", "coordinates": [59.33, 18.07]},
+            "datetime_start": datetime(2025, 4, 1, 20, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/sthlm",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        # User located in Stockholm
+        response = await client.get("/api/events?sort=nearby&lat=59.33&lon=18.07")
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["title"] == "Stockholm Show"
+        assert data[1]["title"] == "Gothenburg Gig"
+
+    async def test_nearby_without_coords_falls_back_to_time(self, client, setup_db):
+        """sort=nearby without lat/lon should fall back to time sort."""
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "Late",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 20, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/late-n",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Early",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 4, 1, 10, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/early-n",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        response = await client.get("/api/events?sort=nearby")
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["title"] == "Early"
+        assert data[1]["title"] == "Late"
+
+    async def test_events_without_coordinates_sorted_last(self, client, setup_db):
+        """Events with no venue coordinates should appear after events with coords."""
+        from app.db import mongodb
+
+        await mongodb.db.events.insert_one({
+            "title": "No Coords",
+            "venue": {"name": "Mystery Venue"},
+            "datetime_start": datetime(2025, 4, 1, 10, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/no-coords",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+        await mongodb.db.events.insert_one({
+            "title": "Has Coords",
+            "venue": {"name": "Known Venue", "coordinates": [59.33, 18.07]},
+            "datetime_start": datetime(2025, 4, 1, 20, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/has-coords",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime.now(timezone.utc),
+        })
+
+        response = await client.get("/api/events?sort=nearby&lat=59.33&lon=18.07")
+        assert response.status_code == 200
+        data = response.json()
+        assert data[0]["title"] == "Has Coords"
+        assert data[1]["title"] == "No Coords"
 
 
 class TestGetEventById:

@@ -36,7 +36,7 @@ from app.auth.password import hash_password
 from app.auth.jwt import create_access_token
 
 settings = get_settings()
-assert settings.mongodb_db_name == "stockholm_events_test", (
+assert settings.mongodb_db_name == "sweden_events_test", (
     f"Expected test DB, got {settings.mongodb_db_name}"
 )
 
@@ -64,6 +64,7 @@ async def setup_db():
     await mongodb.db.events.create_index("datetime_start")
     await mongodb.db.events.create_index("price.bucket")
     await mongodb.db.events.create_index("source_url", unique=True)
+    await mongodb.db.events.create_index("content_hash", unique=True, sparse=True)
     await mongodb.db.users.create_index("email", unique=True)
     await mongodb.db.users.create_index("email_verification_token", sparse=True)
     await mongodb.db.users.create_index("password_reset_token", sparse=True)
@@ -72,6 +73,7 @@ async def setup_db():
 
     await mongodb.db.events.delete_many({})
     await mongodb.db.users.delete_many({})
+    await mongodb.db.invite_codes.delete_many({})
     mongo_client.close()
 
 
@@ -150,6 +152,7 @@ async def sample_event(setup_db):
         "title": "Test Concert",
         "description": "A great concert in Stockholm",
         "venue": {"name": "Konserthuset", "address": "Hötorget 8, Stockholm"},
+        "city": "Stockholm",
         "datetime_start": datetime(2025, 3, 15, 19, 0),
         "datetime_end": datetime(2025, 3, 15, 22, 0),
         "price": {"amount": 250.0, "currency": "SEK", "bucket": "standard"},

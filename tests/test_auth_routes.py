@@ -27,10 +27,14 @@ class TestRegister:
 
     async def test_register_success(self, client):
         """A valid registration should return 201 with access and refresh tokens."""
+        from app.db import mongodb
+        await mongodb.db.invite_codes.insert_one({"code": "TESTCODE", "used": False})
+
         response = await client.post("/api/auth/register", json={
             "email": "new@example.com",
             "password": "StrongPass1",
             "name": "New User",
+            "invite_code": "TESTCODE",
         })
         assert response.status_code == 201
 
@@ -42,17 +46,25 @@ class TestRegister:
 
     async def test_duplicate_email_returns_409(self, client, test_user):
         """Registering with an already-used email should return 409 Conflict."""
+        from app.db import mongodb
+        await mongodb.db.invite_codes.insert_one({"code": "DUPECODE", "used": False})
+
         response = await client.post("/api/auth/register", json={
             "email": "test@example.com",
             "password": "StrongPass1",
+            "invite_code": "DUPECODE",
         })
         assert response.status_code == 409
 
     async def test_case_insensitive_email_duplicate(self, client, test_user):
         """Email uniqueness check should be case-insensitive."""
+        from app.db import mongodb
+        await mongodb.db.invite_codes.insert_one({"code": "CASECODE", "used": False})
+
         response = await client.post("/api/auth/register", json={
             "email": "TEST@example.com",
             "password": "StrongPass1",
+            "invite_code": "CASECODE",
         })
         assert response.status_code == 409
 
@@ -61,8 +73,55 @@ class TestRegister:
         response = await client.post("/api/auth/register", json={
             "email": "weak@example.com",
             "password": "alllowercase",
+            "invite_code": "ANYCODE",
         })
         assert response.status_code == 422
+
+    async def test_register_valid_invite_code(self, client):
+        """Registration with a valid unused invite code should succeed and mark the code used."""
+        from app.db import mongodb
+        await mongodb.db.invite_codes.insert_one({"code": "VALIDINV", "used": False})
+
+        response = await client.post("/api/auth/register", json={
+            "email": "invited@example.com",
+            "password": "StrongPass1",
+            "name": "Invited User",
+            "invite_code": "VALIDINV",
+        })
+        assert response.status_code == 201
+
+        # Verify invite code is now marked as used
+        code_doc = await mongodb.db.invite_codes.find_one({"code": "VALIDINV"})
+        assert code_doc["used"] is True
+        assert code_doc["used_by_email"] == "invited@example.com"
+        assert code_doc["used_at"] is not None
+
+    async def test_register_invalid_invite_code(self, client):
+        """Registration with a non-existent invite code should return 403."""
+        response = await client.post("/api/auth/register", json={
+            "email": "someone@example.com",
+            "password": "StrongPass1",
+            "invite_code": "NOSUCHCD",
+        })
+        assert response.status_code == 403
+        assert "invite code" in response.json()["detail"].lower()
+
+    async def test_register_already_used_invite_code(self, client):
+        """Registration with an already-used invite code should return 403."""
+        from app.db import mongodb
+        await mongodb.db.invite_codes.insert_one({
+            "code": "USEDCODE",
+            "used": True,
+            "used_by_email": "previous@example.com",
+        })
+
+        response = await client.post("/api/auth/register", json={
+            "email": "newcomer@example.com",
+            "password": "StrongPass1",
+            "invite_code": "USEDCODE",
+        })
+        assert response.status_code == 403
+        assert "invite code" in response.json()["detail"].lower()
 
 
 class TestLogin:

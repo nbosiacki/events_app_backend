@@ -16,6 +16,7 @@ async def connect_to_mongo():
     await db.events.create_index("datetime_start")
     await db.events.create_index("price.bucket")
     await db.events.create_index("source_url", unique=True)
+    await db.events.create_index("content_hash", unique=True, sparse=True)
 
     # Create indexes for users collection (authentication)
     await db.users.create_index("email", unique=True)

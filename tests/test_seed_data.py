@@ -235,3 +235,53 @@ class TestTemplateData:
         # Verify each day is covered
         online_days = {e["datetime_start"].date() for e in online}
         assert len(online_days) >= 22
+
+    def test_events_have_city_field(self):
+        """Every generated event must include a city field."""
+        now = datetime.utcnow()
+        for i in range(30):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            assert "city" in event
+
+    def test_multiple_cities_represented(self):
+        """Generated events should span multiple Swedish cities."""
+        events = generate_events(count=80)
+        cities = {e["city"] for e in events if e["city"] is not None}
+        assert len(cities) >= 3, f"Expected events from at least 3 cities, got: {cities}"
+
+    def test_venues_have_city_field(self):
+        """All venue templates must include a city key."""
+        for v in VENUES:
+            assert "city" in v
+
+    def test_venues_have_country_field(self):
+        """All venue templates must include a country key."""
+        for v in VENUES:
+            assert "country" in v
+
+    def test_physical_venues_have_country_sweden(self):
+        """All physical venue templates should have country='Sweden'."""
+        for v in VENUES:
+            if v.get("address") is not None:
+                assert v["country"] == "Sweden"
+
+    def test_generated_event_has_tickets_available(self):
+        """Every generated event must include a tickets_available field."""
+        now = datetime.utcnow()
+        for i in range(30):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            assert "tickets_available" in event
+
+    def test_tickets_available_is_bool_or_none(self):
+        """tickets_available must be True, False, or None."""
+        now = datetime.utcnow()
+        for i in range(50):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            assert event["tickets_available"] in (True, False, None)
+
+    def test_generated_event_venue_has_country(self):
+        """Venue sub-document in generated events must include a country key."""
+        now = datetime.utcnow()
+        for i in range(30):
+            event = generate_event_dict(i, now, now + timedelta(days=7))
+            assert "country" in event["venue"]

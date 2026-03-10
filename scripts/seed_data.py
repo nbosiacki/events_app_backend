@@ -2,9 +2,9 @@
 """
 Seed the development database with realistic dummy events.
 
-Generates template-based Stockholm events (no external API calls) and inserts
-them into MongoDB.  Events span from 7 days in the past to 14 days in the
-future so the frontend DatePicker always has data to show.
+Generates template-based events across Swedish cities (no external API calls)
+and inserts them into MongoDB.  Events span from 7 days in the past to 14 days
+in the future so the frontend DatePicker always has data to show.
 
 Usage:
     python -m scripts.seed_data                      # Insert 50 events into dev DB
@@ -34,23 +34,34 @@ from app.auth.password import hash_password
 # ---------------------------------------------------------------------------
 
 VENUES = [
-    {"name": "Konserthuset", "address": "Hötorget 8, 111 57 Stockholm", "coordinates": [59.3346, 18.0632]},
-    {"name": "Södra Teatern", "address": "Mosebacke Torg 1-3, 116 46 Stockholm", "coordinates": [59.3182, 18.0730]},
-    {"name": "Fotografiska", "address": "Stadsgårdshamnen 22, 116 45 Stockholm", "coordinates": [59.3180, 18.0856]},
-    {"name": "Kungsträdgården", "address": "Jussi Björlings Allé 2, 111 47 Stockholm", "coordinates": [59.3308, 18.0717]},
-    {"name": "Avicii Arena", "address": "Globentorget 2, 121 77 Stockholm", "coordinates": [59.2937, 18.0831]},
-    {"name": "Moderna Museet", "address": "Exercisplan 4, 111 49 Stockholm", "coordinates": [59.3261, 18.0845]},
-    {"name": "Kulturhuset Stadsteatern", "address": "Sergels Torg 3, 111 57 Stockholm", "coordinates": [59.3325, 18.0649]},
-    {"name": "Debaser Strand", "address": "Hornstulls Strand 4, 117 39 Stockholm", "coordinates": [59.3158, 18.0344]},
-    {"name": "Mosebacke Etablissement", "address": "Mosebacke Torg 3, 116 46 Stockholm", "coordinates": [59.3183, 18.0733]},
-    {"name": "Berns Salonger", "address": "Berzelii Park, 111 47 Stockholm", "coordinates": [59.3327, 18.0728]},
-    {"name": "Stockholm Stadion", "address": "Lidingövägen 1, 114 33 Stockholm", "coordinates": [59.3454, 18.0793]},
-    {"name": "Dramaten", "address": "Nybroplan, 111 47 Stockholm", "coordinates": [59.3318, 18.0770]},
-    {"name": "Skansen", "address": "Djurgårdsslätten 49-51, 115 21 Stockholm", "coordinates": [59.3264, 18.1036]},
-    {"name": "Vasamuseet", "address": "Galärvarvsvägen 14, 115 21 Stockholm", "coordinates": [59.3280, 18.0914]},
-    {"name": "Münchenbryggeriet", "address": "Torkel Knutssonsgatan 2, 118 25 Stockholm", "coordinates": [59.3171, 18.0580]},
-    {"name": "Online Event", "address": None, "coordinates": None},
-    {"name": "Zoom Webinar", "address": None, "coordinates": None},
+    # Stockholm
+    {"name": "Konserthuset", "address": "Hötorget 8, 111 57 Stockholm", "coordinates": [59.3346, 18.0632], "city": "Stockholm", "country": "Sweden"},
+    {"name": "Södra Teatern", "address": "Mosebacke Torg 1-3, 116 46 Stockholm", "coordinates": [59.3182, 18.0730], "city": "Stockholm", "country": "Sweden"},
+    {"name": "Fotografiska", "address": "Stadsgårdshamnen 22, 116 45 Stockholm", "coordinates": [59.3180, 18.0856], "city": "Stockholm", "country": "Sweden"},
+    {"name": "Avicii Arena", "address": "Globentorget 2, 121 77 Stockholm", "coordinates": [59.2937, 18.0831], "city": "Stockholm", "country": "Sweden"},
+    {"name": "Moderna Museet", "address": "Exercisplan 4, 111 49 Stockholm", "coordinates": [59.3261, 18.0845], "city": "Stockholm", "country": "Sweden"},
+    {"name": "Kulturhuset Stadsteatern", "address": "Sergels Torg 3, 111 57 Stockholm", "coordinates": [59.3325, 18.0649], "city": "Stockholm", "country": "Sweden"},
+    {"name": "Berns Salonger", "address": "Berzelii Park, 111 47 Stockholm", "coordinates": [59.3327, 18.0728], "city": "Stockholm", "country": "Sweden"},
+    {"name": "Dramaten", "address": "Nybroplan, 111 47 Stockholm", "coordinates": [59.3318, 18.0770], "city": "Stockholm", "country": "Sweden"},
+    {"name": "Skansen", "address": "Djurgårdsslätten 49-51, 115 21 Stockholm", "coordinates": [59.3264, 18.1036], "city": "Stockholm", "country": "Sweden"},
+    # Gothenburg
+    {"name": "Göteborgsoperan", "address": "Christina Nilssons gata, 411 04 Gothenburg", "coordinates": [57.7089, 11.9746], "city": "Gothenburg", "country": "Sweden"},
+    {"name": "Liseberg", "address": "Örgrytevägen 5, 402 22 Gothenburg", "coordinates": [57.6965, 12.0003], "city": "Gothenburg", "country": "Sweden"},
+    {"name": "Göteborg Konserthus", "address": "Götaplatsen, 412 56 Gothenburg", "coordinates": [57.6967, 11.9836], "city": "Gothenburg", "country": "Sweden"},
+    {"name": "Pustervik", "address": "Järntorget 2, 413 04 Gothenburg", "coordinates": [57.7031, 11.9554], "city": "Gothenburg", "country": "Sweden"},
+    # Malmö
+    {"name": "Malmö Live", "address": "August Palms plats 2, 211 38 Malmö", "coordinates": [55.6108, 13.0004], "city": "Malmö", "country": "Sweden"},
+    {"name": "Malmö Opera", "address": "Östra Rönneholmsvägen 20, 211 34 Malmö", "coordinates": [55.5987, 13.0010], "city": "Malmö", "country": "Sweden"},
+    {"name": "Inkonst", "address": "Bergsgatan 29, 214 22 Malmö", "coordinates": [55.5897, 13.0106], "city": "Malmö", "country": "Sweden"},
+    # Uppsala
+    {"name": "Uppsala Konsert & Kongress", "address": "Vaksalagatan 1, 753 20 Uppsala", "coordinates": [59.8594, 17.6415], "city": "Uppsala", "country": "Sweden"},
+    {"name": "Fyrishov", "address": "Idrottsgatan 2, 754 50 Uppsala", "coordinates": [59.8784, 17.6341], "city": "Uppsala", "country": "Sweden"},
+    # Västerås
+    {"name": "Västerås Konserthus", "address": "Kopparbergsvägen 1, 721 87 Västerås", "coordinates": [59.6165, 16.5528], "city": "Västerås", "country": "Sweden"},
+    {"name": "ABB Arena", "address": "Rokstaborgsvägen 1, 724 75 Västerås", "coordinates": [59.6243, 16.5432], "city": "Västerås", "country": "Sweden"},
+    # Online
+    {"name": "Online Event", "address": None, "coordinates": None, "city": None, "country": None},
+    {"name": "Zoom Webinar", "address": None, "coordinates": None, "city": None, "country": None},
 ]
 
 CATEGORIES = [
@@ -267,10 +278,10 @@ EVENT_TEMPLATES = [
 
 SOURCE_SITES = [
     "eventbrite.com",
-    "visitstockholm.com",
-    "stockholmlive.com",
-    "alltistockholm.se",
+    "visitsweden.com",
     "ticnet.se",
+    "tickster.com",
+    "biljettkiosken.se",
 ]
 
 # Deterministic placeholder images per category (picsum.photos with seeded IDs)
@@ -369,6 +380,9 @@ def generate_event_dict(
     if is_online:
         online_link = f"https://zoom.us/j/{random.randint(100000000, 999999999)}"
 
+    # tickets_available: True (available), False (sold out), or None (unknown)
+    tickets_available = random.choices([True, False, None], weights=[60, 20, 20])[0]
+
     return {
         "title": title,
         "description": description,
@@ -376,7 +390,9 @@ def generate_event_dict(
             "name": venue["name"],
             "address": venue.get("address"),
             "coordinates": venue.get("coordinates"),
+            "country": venue.get("country"),
         },
+        "city": venue.get("city"),
         "datetime_start": dt_start,
         "datetime_end": dt_end,
         "price": price.model_dump(),
@@ -386,6 +402,7 @@ def generate_event_dict(
         "image_url": image_url,
         "is_online": is_online,
         "online_link": online_link,
+        "tickets_available": tickets_available,
         "like_count": like_count,
         "attend_count": attend_count,
         "scraped_at": datetime.utcnow(),

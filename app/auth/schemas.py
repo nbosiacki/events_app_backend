@@ -20,6 +20,7 @@ class UserRegister(BaseModel):
     email: EmailStr
     password: str = Field(..., min_length=8)
     name: Optional[str] = None
+    invite_code: str
 
     @field_validator("password")
     @classmethod

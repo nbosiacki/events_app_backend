@@ -71,10 +71,17 @@ class TestVenue:
             name="Konserthuset",
             address="Hötorget 8",
             coordinates=[59.3346, 18.0632],
+            country="Sweden",
         )
         assert venue.name == "Konserthuset"
         assert venue.address == "Hötorget 8"
         assert venue.coordinates == [59.3346, 18.0632]
+        assert venue.country == "Sweden"
+
+    def test_venue_country_defaults_to_none(self):
+        """country should default to None when not provided."""
+        venue = Venue(name="Test Venue")
+        assert venue.country is None
 
 
 class TestEventResponseFromMongo:
@@ -255,3 +262,131 @@ class TestOnlineFields:
         event = EventResponse.from_mongo(doc)
         assert event.is_online is False
         assert event.online_link is None
+
+
+class TestCityField:
+    """Verify city field on EventBase and EventResponse."""
+
+    def test_city_defaults_to_none(self):
+        """EventCreate should default city to None."""
+        from app.models.event import EventCreate
+
+        event = EventCreate(
+            title="Test",
+            venue=Venue(name="V"),
+            datetime_start=datetime(2025, 6, 1, 18, 0),
+            source_url="https://example.com/test",
+            source_site="example.com",
+        )
+        assert event.city is None
+
+    def test_city_stored_when_provided(self):
+        """EventCreate should store city when explicitly set."""
+        from app.models.event import EventCreate
+
+        event = EventCreate(
+            title="Concert",
+            venue=Venue(name="Konserthuset"),
+            datetime_start=datetime(2025, 6, 1, 18, 0),
+            source_url="https://example.com/concert",
+            source_site="example.com",
+            city="Stockholm",
+        )
+        assert event.city == "Stockholm"
+
+    def test_from_mongo_with_city(self):
+        """EventResponse.from_mongo should include city when present."""
+        doc = {
+            "_id": ObjectId(),
+            "title": "Gothenburg Jazz",
+            "venue": {"name": "Pustervik"},
+            "city": "Gothenburg",
+            "datetime_start": datetime(2025, 6, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/gbg-jazz",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime(2025, 5, 1, 12, 0),
+        }
+        event = EventResponse.from_mongo(doc)
+        assert event.city == "Gothenburg"
+
+    def test_from_mongo_without_city(self):
+        """EventResponse.from_mongo should default city to None for old documents."""
+        doc = {
+            "_id": ObjectId(),
+            "title": "Old Event",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 6, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/old2",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime(2025, 5, 1, 12, 0),
+        }
+        event = EventResponse.from_mongo(doc)
+        assert event.city is None
+
+
+class TestTicketsAvailableField:
+    """Verify tickets_available field on EventBase and EventResponse."""
+
+    def test_tickets_available_defaults_to_none(self):
+        """EventCreate should default tickets_available to None."""
+        from app.models.event import EventCreate
+
+        event = EventCreate(
+            title="Test",
+            venue=Venue(name="V"),
+            datetime_start=datetime(2025, 6, 1, 18, 0),
+            source_url="https://example.com/test3",
+            source_site="example.com",
+        )
+        assert event.tickets_available is None
+
+    def test_tickets_available_false_stored(self):
+        """tickets_available=False (sold out) should be stored correctly."""
+        from app.models.event import EventCreate
+
+        event = EventCreate(
+            title="Sold Out Show",
+            venue=Venue(name="V"),
+            datetime_start=datetime(2025, 6, 1, 18, 0),
+            source_url="https://example.com/sold-out",
+            source_site="example.com",
+            tickets_available=False,
+        )
+        assert event.tickets_available is False
+
+    def test_from_mongo_with_tickets_available(self):
+        """EventResponse.from_mongo should include tickets_available when present."""
+        doc = {
+            "_id": ObjectId(),
+            "title": "Sold Out Event",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 6, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/sold-out2",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime(2025, 5, 1, 12, 0),
+            "tickets_available": False,
+        }
+        event = EventResponse.from_mongo(doc)
+        assert event.tickets_available is False
+
+    def test_from_mongo_tickets_available_none_when_missing(self):
+        """EventResponse.from_mongo should default tickets_available to None."""
+        doc = {
+            "_id": ObjectId(),
+            "title": "Old Event",
+            "venue": {"name": "V"},
+            "datetime_start": datetime(2025, 6, 1, 18, 0),
+            "price": {"amount": 0, "currency": "SEK", "bucket": "free"},
+            "source_url": "https://example.com/old3",
+            "source_site": "example.com",
+            "categories": [],
+            "scraped_at": datetime(2025, 5, 1, 12, 0),
+        }
+        event = EventResponse.from_mongo(doc)
+        assert event.tickets_available is None

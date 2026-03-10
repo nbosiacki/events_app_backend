@@ -45,6 +45,7 @@ from app.auth.schemas import (
 from app.config import get_settings
 from app.db.mongodb import get_database
 from app.models.user import User
+from app.services.email import send_password_reset_email
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -59,6 +60,14 @@ async def register(user_data: UserRegister):
     """
     db = get_database()
     settings = get_settings()
+
+    # Validate invite code
+    invite = await db.invite_codes.find_one({"code": user_data.invite_code, "used": False})
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid or already used invite code",
+        )
 
     # Check if email already exists (case-insensitive)
     existing = await db.users.find_one({"email": user_data.email.lower()})
@@ -90,6 +99,12 @@ async def register(user_data: UserRegister):
 
     result = await db.users.insert_one(user_dict)
     user_id = str(result.inserted_id)
+
+    # Mark invite code as used
+    await db.invite_codes.update_one(
+        {"code": user_data.invite_code, "used": False},
+        {"$set": {"used": True, "used_by_email": user_data.email.lower(), "used_at": datetime.now(timezone.utc)}}
+    )
 
     # Generate tokens
     return TokenResponse(
@@ -265,13 +280,8 @@ async def forgot_password(request: PasswordResetRequest):
         },
     )
 
-    # TODO: Send email with reset link
-    # reset_url = f"{settings.frontend_url}/reset-password?token={reset_token}"
-    # email_service.send_password_reset(user["email"], reset_url)
-
-    # For development, print the token (remove in production!)
-    if settings.debug:
-        print(f"[DEBUG] Password reset token for {request.email}: {reset_token}")
+    reset_url = f"{settings.frontend_url}/reset-password?token={reset_token}"
+    await send_password_reset_email(user["email"], reset_url)
 
     return MessageResponse(message=response_message)
 

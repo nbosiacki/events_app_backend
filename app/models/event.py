@@ -22,6 +22,7 @@ class Venue(BaseModel):
     name: str
     address: Optional[str] = None
     coordinates: Optional[List[float]] = None  # [lat, lng]
+    country: Optional[str] = None
 
 
 class Price(BaseModel):
@@ -46,6 +47,7 @@ class EventBase(BaseModel):
     title: str
     description: Optional[str] = None
     venue: Venue
+    city: Optional[str] = None
     datetime_start: datetime
     datetime_end: Optional[datetime] = None
     price: Price = Field(default_factory=lambda: Price())
@@ -55,6 +57,7 @@ class EventBase(BaseModel):
     image_url: Optional[str] = None
     is_online: bool = False
     online_link: Optional[str] = None
+    tickets_available: Optional[bool] = None
     like_count: int = 0
     attend_count: int = 0
     raw_data: Optional[dict] = None
@@ -82,6 +85,7 @@ class EventResponse(BaseModel):
     title: str
     description: Optional[str] = None
     venue: Venue
+    city: Optional[str] = None
     datetime_start: datetime
     datetime_end: Optional[datetime] = None
     price: Price
@@ -91,6 +95,7 @@ class EventResponse(BaseModel):
     image_url: Optional[str] = None
     is_online: bool = False
     online_link: Optional[str] = None
+    tickets_available: Optional[bool] = None
     like_count: int = 0
     attend_count: int = 0
     scraped_at: datetime
@@ -102,6 +107,7 @@ class EventResponse(BaseModel):
             title=doc["title"],
             description=doc.get("description"),
             venue=Venue(**doc["venue"]),
+            city=doc.get("city"),
             datetime_start=doc["datetime_start"],
             datetime_end=doc.get("datetime_end"),
             price=Price(**doc["price"]),
@@ -111,6 +117,7 @@ class EventResponse(BaseModel):
             image_url=doc.get("image_url"),
             is_online=doc.get("is_online", False),
             online_link=doc.get("online_link"),
+            tickets_available=doc.get("tickets_available"),
             like_count=doc.get("like_count", 0),
             attend_count=doc.get("attend_count", 0),
             scraped_at=doc.get("scraped_at", datetime.utcnow()),
