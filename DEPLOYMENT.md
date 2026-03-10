@@ -38,7 +38,7 @@ it. This is intentional: the VM's firewall only allows ports 80 and 443.
 Before starting, confirm you have:
 
 - [ ] A Google Cloud account and a project created
-- [ ] The `gcloud` CLI installed locally (`brew install google-cloud-sdk` or https://cloud.google.com/sdk/docs/install)
+- [ ] The `gcloud` CLI installed and authenticated locally (see SSH section in Step 6 below)
 - [ ] Access to your domain registrar for nicholasbosiacki.com
 - [ ] The Gmail account you want to use for password reset emails
 - [ ] 2FA enabled on that Gmail account (required for App Passwords — see Step 1)
@@ -164,29 +164,64 @@ is not pointing at the VM when it runs.
 
 ## Step 6 — Bootstrap the VM
 
-SSH into the VM:
+**6a. Install and authenticate gcloud (one-time local setup)**
+
+`gcloud` is Google's CLI tool. It is used to SSH into the VM and must be installed on
+your local machine. Run this **on your local machine**, not the VM:
+
+```bash
+# Ubuntu/Debian
+curl https://packages.cloud.google.com/apt/doc/apt-key.gpg | sudo gpg --dearmor -o /usr/share/keyrings/cloud.google.gpg
+echo "deb [signed-by=/usr/share/keyrings/cloud.google.gpg] https://packages.cloud.google.com/apt cloud-sdk main" | sudo tee /etc/apt/sources.list.d/google-cloud-sdk.list
+sudo apt-get update && sudo apt-get install -y google-cloud-cli
+
+# macOS
+brew install google-cloud-sdk
+```
+
+Authenticate and set your project:
+
+```bash
+gcloud auth login                          # opens browser — sign in with your Google account
+gcloud config set project YOUR_PROJECT_ID  # find project ID in GCP Console top nav bar
+```
+
+Verify:
+
+```bash
+gcloud config get-value project
+```
+
+**Important:** Run `gcloud` commands in your **local terminal**, not the VM terminal.
+The two terminals look similar — double-check the prompt before running commands.
+Local prompt: `nicholas-bosiacki@nicholas-bosiacki-desktop`
+VM prompt: `nicholas@events-app`
+
+**6b. SSH into the VM**
 
 ```bash
 gcloud compute ssh events-app --zone=us-central1-a
 ```
 
-The first time you run this, `gcloud` generates SSH key pairs automatically. Accept the
-defaults. After a moment you'll see a prompt like `nicholas@events-app:~$`.
+`gcloud compute ssh` looks up the VM named `events-app` in your active project via the
+GCP API, retrieves its external IP, and opens an SSH connection. It also automatically
+generates and uploads SSH keys on first use — accept the defaults when prompted.
 
-Run the bootstrap script directly from GitHub:
+After a moment you'll see a prompt like `nicholas@events-app:~$`. All subsequent
+commands in this step run **on the VM**.
+
+**6c. Run the bootstrap script**
 
 ```bash
 sudo bash -c "$(curl -fsSL https://raw.githubusercontent.com/nbosiacki/events_app_backend/main/deploy/setup.sh)"
 ```
-
-Replace `YOUR_USERNAME` with your actual GitHub username.
 
 **What the script does:**
 - Installs Docker CE and the Compose plugin
 - Installs nginx and Certbot
 - Clones the backend repo to `/opt/events_app_backend`
 - Creates `/opt/events_frontend/dist/` (where frontend files will land after rsync)
-- Installs the nginx site config and reloads nginx
+- Installs a temporary HTTP-only nginx config (the full HTTPS config is applied after SSL is issued in Step 8)
 
 It takes about 2–3 minutes. When it finishes you'll see `=== Bootstrap complete. Next steps ===`.
 
@@ -249,7 +284,13 @@ openssl rand -hex 32   # paste as JWT_SECRET_KEY
 openssl rand -hex 16   # paste as ADMIN_API_KEY
 ```
 
-**Save the file:** press `Ctrl+X`, then `Y`, then `Enter`.
+**Save the file:** `Ctrl+O` then `Enter` to save, then `Ctrl+X` to exit.
+
+**Verify it saved correctly:**
+
+```bash
+sudo cat /opt/events_app_backend/.env
+```
 
 Store the admin key somewhere safe outside the VM (e.g. a password manager) — you'll
 need it to trigger syncs and access the analytics dashboard.
@@ -258,13 +299,39 @@ need it to trigger syncs and access the analytics dashboard.
 
 ## Step 8 — Issue the SSL certificate
 
-DNS must be resolving to this VM before running this step. Verify with:
+DNS must be resolving to this VM before running this step. Verify from your local machine:
 
 ```bash
-dig events.nicholasbosiacki.com
+dig events.nicholasbosiacki.com @8.8.8.8
 ```
 
-On the VM:
+The answer section must show your VM IP. If it returns `NXDOMAIN`, wait a few minutes
+and retry — DNS propagation can take up to 10 minutes. Do not proceed until it resolves.
+
+**8a. Replace the bootstrap nginx config with an HTTP-only config**
+
+The bootstrap script installs a minimal HTTP-only nginx config so nginx starts cleanly.
+Verify it is in place before running Certbot:
+
+```bash
+sudo cat /etc/nginx/sites-available/events.nicholasbosiacki.com
+```
+
+It should contain only a simple `server { listen 80; ... }` block with no SSL lines.
+If it contains SSL certificate paths (from a previous bootstrap attempt), replace it:
+
+```bash
+sudo bash -c 'cat > /etc/nginx/sites-available/events.nicholasbosiacki.com << EOF
+server {
+    listen 80;
+    server_name events.nicholasbosiacki.com;
+    root /var/www/html;
+}
+EOF'
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+**8b. Run Certbot**
 
 ```bash
 sudo certbot --nginx -d events.nicholasbosiacki.com
@@ -274,6 +341,15 @@ When prompted:
 - Enter your email address (used for expiry reminders — Certbot itself handles renewal)
 - Agree to the Terms of Service: `Y`
 - Share email with EFF: your choice
+
+**8c. Install the full nginx config**
+
+Now that the SSL certificates exist, install the full production nginx config:
+
+```bash
+sudo cp /opt/events_app_backend/deploy/nginx.conf /etc/nginx/sites-available/events.nicholasbosiacki.com
+sudo nginx -t && sudo systemctl reload nginx
+```
 
 Certbot will edit the nginx config to add the certificate paths, then reload nginx.
 
